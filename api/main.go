@@ -104,27 +104,13 @@ func startGinServer(server *Server) {
 		api.GET("/logs/stats", server.GetLogStats)
 		api.POST("/logs/cleanup", server.CleanupLogs)
 		
-		// Dokito Backend proxy endpoints
-		dokito := api.Group("/dokito")
+		// Dokito Backend proxy endpoints - only docket processing
+		dokito := api.Group("/dokito/admin/docket-process")
 		{
-			// Docket processing endpoints
-			dokito.POST("/dockets/:state/:jurisdiction/submit", server.SubmitRawDockets)
-			dokito.POST("/dockets/:state/:jurisdiction/process-by-ids", server.ProcessDocketsByIds)
-			dokito.POST("/dockets/:state/:jurisdiction/process-jurisdiction", server.ProcessDocketsByJurisdiction)
-			dokito.POST("/dockets/:state/:jurisdiction/process-daterange", server.ProcessDocketsByDateRange)
-			
-			// Case data endpoints
-			dokito.GET("/cases/:state/:jurisdiction/:caseName", server.GetDokitoCase)
-			dokito.GET("/caselist/:state/:jurisdiction/all", server.ListDokitoCases)
-			dokito.POST("/caselist/:state/:jurisdiction/differential", server.GetDokitoCaseDataDifferential)
-			
-			// Attachment endpoints
-			dokito.GET("/attachments/:hash/metadata", server.GetDokitoAttachmentMetadata)
-			dokito.GET("/attachments/:hash/file", server.GetDokitoAttachmentFile)
-			
-			// Administrative endpoints
-			dokito.DELETE("/cases/:state/:jurisdiction/purge", server.PurgeDokitoJurisdiction)
-			dokito.GET("/s3/*path", server.ReadDokitoS3File)
+			dokito.POST("/:state/:jurisdiction/raw-dockets", server.SubmitRawDockets)
+			dokito.POST("/:state/:jurisdiction/by-ids", server.ProcessDocketsByIds)
+			dokito.POST("/:state/:jurisdiction/by-jurisdiction", server.ProcessDocketsByJurisdiction)
+			dokito.POST("/:state/:jurisdiction/by-daterange", server.ProcessDocketsByDateRange)
 		}
 	}
 

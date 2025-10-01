@@ -138,38 +138,46 @@ type AddLogRequest struct {
 
 // ===== DOKITO BACKEND DATA STRUCTURES =====
 
-// ProcessingAction represents the action to take on dockets
-type ProcessingAction string
+// ProcessingActionRawData represents actions for raw dockets (used in raw-dockets endpoint)
+type ProcessingActionRawData string
 
 const (
-	ProcessingActionProcessOnly      ProcessingAction = "process_only"
-	ProcessingActionIngestOnly       ProcessingAction = "ingest_only"
-	ProcessingActionProcessAndIngest ProcessingAction = "process_and_ingest"
-	ProcessingActionUploadRaw        ProcessingAction = "upload_raw"
+	ProcessingActionRawDataProcessOnly      ProcessingActionRawData = "process_only"
+	ProcessingActionRawDataProcessAndIngest ProcessingActionRawData = "process_and_ingest"
+	ProcessingActionRawDataUploadRaw        ProcessingActionRawData = "upload_raw"
+)
+
+// ProcessingActionIdOnly represents actions for ID-based processing (used in by-ids, by-jurisdiction, by-daterange)
+type ProcessingActionIdOnly string
+
+const (
+	ProcessingActionIdOnlyProcessOnly      ProcessingActionIdOnly = "process_only"
+	ProcessingActionIdOnlyIngestOnly       ProcessingActionIdOnly = "ingest_only"
+	ProcessingActionIdOnlyProcessAndIngest ProcessingActionIdOnly = "process_and_ingest"
 )
 
 // RawDocketsRequest represents a request to submit raw dockets
 type RawDocketsRequest struct {
-	Action  ProcessingAction    `json:"action" binding:"required"`
-	Dockets []RawGenericDocket  `json:"dockets" binding:"required"`
+	Action  ProcessingActionRawData `json:"action" binding:"required"`
+	Dockets []RawGenericDocket      `json:"dockets" binding:"required"`
 }
 
 // ByIdsRequest represents a request to process dockets by IDs
 type ByIdsRequest struct {
-	Action    ProcessingAction `json:"action" binding:"required"`
-	DocketIds []string         `json:"docket_ids" binding:"required"`
+	Action    ProcessingActionIdOnly `json:"action" binding:"required"`
+	DocketIds []string               `json:"docket_ids" binding:"required"`
 }
 
 // ByJurisdictionRequest represents a request to process all dockets in a jurisdiction
 type ByJurisdictionRequest struct {
-	Action ProcessingAction `json:"action" binding:"required"`
+	Action ProcessingActionIdOnly `json:"action" binding:"required"`
 }
 
 // ByDateRangeRequest represents a request to process dockets within a date range
 type ByDateRangeRequest struct {
-	Action    ProcessingAction `json:"action" binding:"required"`
-	StartDate string           `json:"start_date" binding:"required"` // Format: YYYY-MM-DD
-	EndDate   string           `json:"end_date" binding:"required"`   // Format: YYYY-MM-DD
+	Action    ProcessingActionIdOnly `json:"action" binding:"required"`
+	StartDate string                 `json:"start_date" binding:"required"` // Format: YYYY-MM-DD (will be validated)
+	EndDate   string                 `json:"end_date" binding:"required"`   // Format: YYYY-MM-DD (will be validated)
 }
 
 // ProcessingResponse represents the response from dokito backend processing
@@ -180,9 +188,31 @@ type ProcessingResponse struct {
 }
 
 // CaseRawOrProcessed represents either a raw or processed case
+// This matches the Rust enum serialization: either {"Processed": {...}} or {"Raw": {...}}
 type CaseRawOrProcessed struct {
-	Type string      `json:"type"` // "raw" or "processed"
-	Data interface{} `json:"data"`
+	Processed *ProcessedGenericDocket `json:"Processed,omitempty"`
+	Raw       *RawGenericDocket       `json:"Raw,omitempty"`
+}
+
+// ProcessedGenericDocket represents a processed legal case docket
+type ProcessedGenericDocket struct {
+	CaseGovID       string                   `json:"case_govid"`
+	OpenedDate      string                   `json:"opened_date"`
+	ObjectUUID      string                   `json:"object_uuid"`
+	CaseName        string                   `json:"case_name"`
+	CaseURL         string                   `json:"case_url"`
+	CaseType        string                   `json:"case_type"`
+	CaseSubtype     string                   `json:"case_subtype"`
+	Description     string                   `json:"description"`
+	Industry        string                   `json:"industry"`
+	PetitionerList  []interface{}            `json:"petitioner_list"`
+	HearingOfficer  string                   `json:"hearing_officer"`
+	ClosedDate      *string                  `json:"closed_date,omitempty"`
+	Filings         []interface{}            `json:"filings"`
+	CaseParties     []interface{}            `json:"case_parties"`
+	ExtraMetadata   map[string]interface{}   `json:"extra_metadata"`
+	IndexedAt       time.Time                `json:"indexed_at"`
+	ProcessedAt     time.Time                `json:"processed_at"`
 }
 
 // RawGenericDocket represents a raw legal case docket (simplified version)
@@ -240,13 +270,3 @@ type GenericParty struct {
 	Metadata    map[string]interface{} `json:"metadata"`
 }
 
-// DokitoCaseListResponse represents a response from the caselist endpoint
-type DokitoCaseListResponse struct {
-	Cases []interface{} `json:"cases"`
-	Total int           `json:"total"`
-}
-
-// DokitoAttachmentResponse represents attachment metadata response
-type DokitoAttachmentResponse struct {
-	Metadata interface{} `json:"metadata"`
-}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -734,6 +733,37 @@ func getEnvAsInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+// ===== DOKITO REQUEST VALIDATION FUNCTIONS =====
+
+// validateDateFormat validates that a date string is in YYYY-MM-DD format
+func validateDateFormat(dateStr string) error {
+	_, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return fmt.Errorf("date must be in YYYY-MM-DD format")
+	}
+	return nil
+}
+
+// validateRawDataAction validates action types for raw dockets endpoint
+func validateRawDataAction(action string) error {
+	switch ProcessingActionRawData(action) {
+	case ProcessingActionRawDataProcessOnly, ProcessingActionRawDataProcessAndIngest, ProcessingActionRawDataUploadRaw:
+		return nil
+	default:
+		return fmt.Errorf("invalid action for raw dockets: %s (must be process_only, process_and_ingest, or upload_raw)", action)
+	}
+}
+
+// validateIdOnlyAction validates action types for ID-based endpoints
+func validateIdOnlyAction(action string) error {
+	switch ProcessingActionIdOnly(action) {
+	case ProcessingActionIdOnlyProcessOnly, ProcessingActionIdOnlyIngestOnly, ProcessingActionIdOnlyProcessAndIngest:
+		return nil
+	default:
+		return fmt.Errorf("invalid action for ID-based processing: %s (must be process_only, ingest_only, or process_and_ingest)", action)
+	}
+}
+
 // ===== DOKITO BACKEND API ENDPOINTS =====
 
 // SubmitRawDockets handles raw docket submission to dokito backend
@@ -748,6 +778,12 @@ func (s *Server) SubmitRawDockets(c *gin.Context) {
 
 	var req RawDocketsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Validate action type for raw data endpoint
+	if err := validateRawDataAction(string(req.Action)); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -781,6 +817,12 @@ func (s *Server) ProcessDocketsByIds(c *gin.Context) {
 		return
 	}
 
+	// Validate action type for ID-only endpoints
+	if err := validateIdOnlyAction(string(req.Action)); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
 	log.Printf("Processing %d dockets by IDs for %s/%s with action: %s", 
 		len(req.DocketIds), state, jurisdiction, req.Action)
 
@@ -806,6 +848,12 @@ func (s *Server) ProcessDocketsByJurisdiction(c *gin.Context) {
 
 	var req ByJurisdictionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Validate action type for ID-only endpoints
+	if err := validateIdOnlyAction(string(req.Action)); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -839,6 +887,22 @@ func (s *Server) ProcessDocketsByDateRange(c *gin.Context) {
 		return
 	}
 
+	// Validate date format (YYYY-MM-DD)
+	if err := validateDateFormat(req.StartDate); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("Invalid start_date format: %v", err)})
+		return
+	}
+	if err := validateDateFormat(req.EndDate); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("Invalid end_date format: %v", err)})
+		return
+	}
+
+	// Validate action type for ID-only endpoints
+	if err := validateIdOnlyAction(string(req.Action)); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
 	log.Printf("Processing dockets for %s/%s from %s to %s with action: %s", 
 		state, jurisdiction, req.StartDate, req.EndDate, req.Action)
 
@@ -852,191 +916,3 @@ func (s *Server) ProcessDocketsByDateRange(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// GetDokitoCase fetches a specific case from dokito backend
-func (s *Server) GetDokitoCase(c *gin.Context) {
-	state := c.Param("state")
-	jurisdiction := c.Param("jurisdiction")
-	caseName := c.Param("caseName")
-	
-	if state == "" || jurisdiction == "" || caseName == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "State, jurisdiction, and case name are required"})
-		return
-	}
-
-	log.Printf("Fetching case %s for %s/%s", caseName, state, jurisdiction)
-
-	response, err := s.dokitoClient.GetCase(c.Request.Context(), state, jurisdiction, caseName)
-	if err != nil {
-		log.Printf("Error fetching case: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to fetch case: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-// ListDokitoCases lists all cases for a jurisdiction
-func (s *Server) ListDokitoCases(c *gin.Context) {
-	state := c.Param("state")
-	jurisdiction := c.Param("jurisdiction")
-	
-	if state == "" || jurisdiction == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "State and jurisdiction are required"})
-		return
-	}
-
-	// Parse pagination parameters
-	limitStr := c.DefaultQuery("limit", "10")
-	offsetStr := c.DefaultQuery("offset", "0")
-
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100 // Cap at 100
-	}
-
-	offset, err := strconv.Atoi(offsetStr)
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-
-	log.Printf("Listing cases for %s/%s (limit: %d, offset: %d)", state, jurisdiction, limit, offset)
-
-	response, err := s.dokitoClient.ListCases(c.Request.Context(), state, jurisdiction, limit, offset)
-	if err != nil {
-		log.Printf("Error listing cases: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to list cases: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-// GetDokitoCaseDataDifferential gets case data differential
-func (s *Server) GetDokitoCaseDataDifferential(c *gin.Context) {
-	state := c.Param("state")
-	jurisdiction := c.Param("jurisdiction")
-	
-	if state == "" || jurisdiction == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "State and jurisdiction are required"})
-		return
-	}
-
-	var requestBody interface{}
-	if err := c.ShouldBindJSON(&requestBody); err != nil {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-		return
-	}
-
-	log.Printf("Getting case data differential for %s/%s", state, jurisdiction)
-
-	response, err := s.dokitoClient.GetCaseDataDifferential(c.Request.Context(), state, jurisdiction, requestBody)
-	if err != nil {
-		log.Printf("Error getting case data differential: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to get differential: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-// GetDokitoAttachmentMetadata fetches attachment metadata by hash
-func (s *Server) GetDokitoAttachmentMetadata(c *gin.Context) {
-	hash := c.Param("hash")
-	
-	if hash == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Blake2b hash is required"})
-		return
-	}
-
-	log.Printf("Fetching attachment metadata for hash: %s", hash)
-
-	response, err := s.dokitoClient.GetAttachmentMetadata(c.Request.Context(), hash)
-	if err != nil {
-		log.Printf("Error fetching attachment metadata: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to fetch metadata: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-// GetDokitoAttachmentFile fetches attachment file content by hash
-func (s *Server) GetDokitoAttachmentFile(c *gin.Context) {
-	hash := c.Param("hash")
-	
-	if hash == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Blake2b hash is required"})
-		return
-	}
-
-	log.Printf("Fetching attachment file for hash: %s", hash)
-
-	resp, err := s.dokitoClient.GetAttachmentFile(c.Request.Context(), hash)
-	if err != nil {
-		log.Printf("Error fetching attachment file: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to fetch file: %v", err)})
-		return
-	}
-	defer resp.Body.Close()
-
-	// Copy headers from dokito response
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
-
-	c.Status(resp.StatusCode)
-	
-	// Stream the file content
-	_, err = io.Copy(c.Writer, resp.Body)
-	if err != nil {
-		log.Printf("Error streaming attachment file: %v", err)
-	}
-}
-
-// PurgeDokitoJurisdiction deletes all data for a jurisdiction
-func (s *Server) PurgeDokitoJurisdiction(c *gin.Context) {
-	state := c.Param("state")
-	jurisdiction := c.Param("jurisdiction")
-	
-	if state == "" || jurisdiction == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "State and jurisdiction are required"})
-		return
-	}
-
-	log.Printf("Purging all data for jurisdiction %s/%s", state, jurisdiction)
-
-	err := s.dokitoClient.PurgeJurisdiction(c.Request.Context(), state, jurisdiction)
-	if err != nil {
-		log.Printf("Error purging jurisdiction: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to purge jurisdiction: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Jurisdiction purged successfully"})
-}
-
-// ReadDokitoS3File reads a file from S3 via dokito backend
-func (s *Server) ReadDokitoS3File(c *gin.Context) {
-	path := c.Param("path")
-	
-	if path == "" {
-		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "File path is required"})
-		return
-	}
-
-	log.Printf("Reading S3 file: %s", path)
-
-	response, err := s.dokitoClient.ReadS3File(c.Request.Context(), path)
-	if err != nil {
-		log.Printf("Error reading S3 file: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to read file: %v", err)})
-		return
-	}
-
-	c.JSON(http.StatusOK, response)
-}
