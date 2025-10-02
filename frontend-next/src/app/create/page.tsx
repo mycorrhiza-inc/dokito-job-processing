@@ -191,10 +191,10 @@ export default function CreateJobPage() {
         }
       }
 
-      await api.createJob(jobRequest);
+      const createdJob = await api.createJob(jobRequest);
       setSuccess(true);
       setTimeout(() => {
-        router.push('/jobs');
+        router.push(`/jobs/${createdJob.id}`);
       }, 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create job');
