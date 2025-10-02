@@ -12,11 +12,13 @@ import (
 )
 
 type RedisClient struct {
-	client       *redis.Client
-	jobQueue     string
-	statusStream string
-	logStream    string
-	ctx          context.Context
+	client         *redis.Client
+	jobQueue       string
+	statusStream   string
+	logStream      string
+	pipelineQueue  string
+	subTaskQueue   string
+	ctx            context.Context
 }
 
 // RedisJob represents the new job format as specified in newfix.md
@@ -64,11 +66,13 @@ func NewRedisClient() (*RedisClient, error) {
 	log.Printf("Connected to Redis: %s", pong)
 
 	client := &RedisClient{
-		client:       rdb,
-		jobQueue:     getEnvOrDefault("REDIS_JOB_QUEUE", "jobrunner:jobs"),
-		statusStream: getEnvOrDefault("REDIS_STATUS_STREAM", "jobrunner:status"),
-		logStream:    getEnvOrDefault("REDIS_LOG_STREAM", "jobrunner:logs"),
-		ctx:          ctx,
+		client:        rdb,
+		jobQueue:      getEnvOrDefault("REDIS_JOB_QUEUE", "jobrunner:jobs"),
+		statusStream:  getEnvOrDefault("REDIS_STATUS_STREAM", "jobrunner:status"),
+		logStream:     getEnvOrDefault("REDIS_LOG_STREAM", "jobrunner:logs"),
+		pipelineQueue: getEnvOrDefault("REDIS_PIPELINE_QUEUE", "jobrunner:pipeline"),
+		subTaskQueue:  getEnvOrDefault("REDIS_SUBTASK_QUEUE", "jobrunner:subtasks"),
+		ctx:           ctx,
 	}
 
 	log.Printf("Redis client initialized with queue: %s", client.jobQueue)
@@ -518,6 +522,202 @@ func (r *RedisClient) CheckWorkerAlive(workerID string) (bool, error) {
 	
 	log.Printf("No recent activity found for worker %s", workerID)
 	return false, nil
+}
+
+// PublishPipelineJob publishes a pipeline job that will spawn multiple sub-tasks
+func (r *RedisClient) PublishPipelineJob(job *Job) error {
+	// Initialize pipeline progress if not set
+	if job.Progress == nil {
+		job.Progress = &PipelineProgress{
+			TotalGovIDs:     len(job.GovIDs),
+			CurrentStage:    "init",
+			StageProgress:   make(map[string]StageProgress),
+			SubTasks:        make(map[string]SubTaskStatus),
+			FailedGovIDs:    make([]string, 0),
+			CompletedGovIDs: make([]string, 0),
+			LastUpdated:     time.Now(),
+		}
+	}
+
+	// Convert to RedisJob format for pipeline queue
+	redisJob := RedisJob{
+		Task:   "pipeline-coordinator",
+		Data:   job,
+		Status: "pending",
+		Log:    "",
+	}
+
+	jobData, err := json.Marshal(redisJob)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pipeline job: %w", err)
+	}
+
+	// Push to pipeline queue (higher priority than regular jobs)
+	err = r.client.LPush(r.ctx, r.pipelineQueue, jobData).Err()
+	if err != nil {
+		return fmt.Errorf("failed to publish pipeline job to Redis: %w", err)
+	}
+
+	log.Printf("Pipeline job %s published to Redis queue %s", job.ID, r.pipelineQueue)
+	return nil
+}
+
+// PublishSubTask publishes a sub-task for a specific gov ID and pipeline stage
+func (r *RedisClient) PublishSubTask(parentJobID string, govID string, stage string, taskData interface{}) (string, error) {
+	subTaskID := fmt.Sprintf("%s-%s-%s", parentJobID, govID, stage)
+	
+	subTask := &Job{
+		ID:            subTaskID,
+		Mode:          ScrapingModePipelineStage,
+		GovIDs:        []string{govID},
+		ParentJobID:   parentJobID,
+		PipelineStage: stage,
+		IsPipeline:    false,
+		Status:        JobStatusPending,
+		CreatedAt:     time.Now(),
+		DebugInfo:     make(map[string]interface{}),
+	}
+
+	// Add stage-specific data
+	if taskData != nil {
+		subTask.DebugInfo["task_data"] = taskData
+	}
+
+	redisJob := RedisJob{
+		Task:   "pipeline-subtask",
+		Data:   subTask,
+		Status: "pending",
+		Log:    "",
+	}
+
+	jobData, err := json.Marshal(redisJob)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal sub-task: %w", err)
+	}
+
+	// Push to sub-task queue
+	err = r.client.LPush(r.ctx, r.subTaskQueue, jobData).Err()
+	if err != nil {
+		return "", fmt.Errorf("failed to publish sub-task to Redis: %w", err)
+	}
+
+	log.Printf("Sub-task %s published for stage %s, gov ID %s", subTaskID, stage, govID)
+	return subTaskID, nil
+}
+
+// UpdatePipelineProgress updates the progress tracking for a pipeline job
+func (r *RedisClient) UpdatePipelineProgress(jobID string, progress *PipelineProgress) error {
+	progressKey := fmt.Sprintf("jobrunner:progress:%s", jobID)
+	
+	progressData, err := json.Marshal(progress)
+	if err != nil {
+		return fmt.Errorf("failed to marshal progress: %w", err)
+	}
+
+	// Set with expiration (24 hours)
+	err = r.client.Set(r.ctx, progressKey, progressData, 24*time.Hour).Err()
+	if err != nil {
+		return fmt.Errorf("failed to update pipeline progress: %w", err)
+	}
+
+	return nil
+}
+
+// GetPipelineProgress retrieves the progress tracking for a pipeline job
+func (r *RedisClient) GetPipelineProgress(jobID string) (*PipelineProgress, error) {
+	progressKey := fmt.Sprintf("jobrunner:progress:%s", jobID)
+	
+	progressJSON, err := r.client.Get(r.ctx, progressKey).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil // No progress data found
+		}
+		return nil, fmt.Errorf("failed to get pipeline progress: %w", err)
+	}
+
+	var progress PipelineProgress
+	if err := json.Unmarshal([]byte(progressJSON), &progress); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal progress: %w", err)
+	}
+
+	return &progress, nil
+}
+
+// PublishSubTaskUpdate publishes an update for a specific sub-task
+func (r *RedisClient) PublishSubTaskUpdate(subTaskID string, status JobStatus, result interface{}, error string, debugInfo map[string]interface{}) error {
+	update := map[string]interface{}{
+		"sub_task_id": subTaskID,
+		"status":      string(status),
+		"timestamp":   time.Now().Format(time.RFC3339),
+	}
+
+	if result != nil {
+		update["result"] = result
+	}
+	if error != "" {
+		update["error"] = error
+	}
+	if debugInfo != nil {
+		update["debug_info"] = debugInfo
+	}
+
+	// Publish to Redis stream for sub-task updates
+	err := r.client.XAdd(r.ctx, &redis.XAddArgs{
+		Stream: "jobrunner:subtasks:status",
+		Values: update,
+	}).Err()
+
+	if err != nil {
+		return fmt.Errorf("failed to publish sub-task update: %w", err)
+	}
+
+	log.Printf("Sub-task update published for %s: %s", subTaskID, status)
+	return nil
+}
+
+// GetQueueLengths returns the lengths of all job queues
+func (r *RedisClient) GetQueueLengths() (map[string]int64, error) {
+	queues := map[string]string{
+		"main":     r.jobQueue,
+		"pipeline": r.pipelineQueue,
+		"subtask":  r.subTaskQueue,
+	}
+
+	lengths := make(map[string]int64)
+	
+	for name, queue := range queues {
+		length, err := r.client.LLen(r.ctx, queue).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get length of queue %s: %w", name, err)
+		}
+		lengths[name] = length
+	}
+
+	return lengths, nil
+}
+
+// CheckDependencies checks if all dependency jobs are completed
+func (r *RedisClient) CheckDependencies(dependsOn []string) (bool, error) {
+	if len(dependsOn) == 0 {
+		return true, nil // No dependencies
+	}
+
+	for _, jobID := range dependsOn {
+		statusKey := fmt.Sprintf("jobrunner:status:%s", jobID)
+		status, err := r.client.Get(r.ctx, statusKey).Result()
+		if err != nil {
+			if err == redis.Nil {
+				return false, nil // Dependency job not found
+			}
+			return false, fmt.Errorf("failed to check dependency %s: %w", jobID, err)
+		}
+
+		if status != string(JobStatusCompleted) {
+			return false, nil // Dependency not completed
+		}
+	}
+
+	return true, nil // All dependencies completed
 }
 
 // GetJobResult retrieves job result data from Redis

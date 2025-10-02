@@ -29,6 +29,12 @@ const (
 	ScrapingModeFilingsBetweenDates ScrapingMode = "filings-between-dates"
 	ScrapingModeCaseList          ScrapingMode = "case-list"
 	
+	// Pipeline modes for end-to-end processing
+	ScrapingModePipelineIngest     ScrapingMode = "pipeline-ingest"     // Full scrape → upload → process → ingest
+	ScrapingModePipelineUpload     ScrapingMode = "pipeline-upload"     // Scrape → upload raw data only
+	ScrapingModePipelineProcess    ScrapingMode = "pipeline-process"    // Process existing raw data
+	ScrapingModePipelineStage      ScrapingMode = "pipeline-stage"      // Single pipeline stage execution
+	
 	// Dokito backend API modes
 	ScrapingModeDokitoCaseFetch     ScrapingMode = "dokito-case-fetch"
 	ScrapingModeDokitoCaseList      ScrapingMode = "dokito-caselist"
@@ -48,17 +54,78 @@ const (
 	LogLevelError LogLevel = "error"
 )
 
-// LogEntry represents a single log entry for a job
+// LogEntry represents a single log entry for a job with pipeline support
 type LogEntry struct {
-	ID        string    `json:"id"`
-	Timestamp time.Time `json:"timestamp"`
-	Level     LogLevel  `json:"level"`
-	Message   string    `json:"message"`
-	WorkerID  string    `json:"worker_id,omitempty"`
-	Metadata  map[string]interface{} `json:"metadata,omitempty"`
+	ID             string                 `json:"id"`
+	Timestamp      time.Time              `json:"timestamp"`
+	Level          LogLevel               `json:"level"`
+	Message        string                 `json:"message"`
+	WorkerID       string                 `json:"worker_id,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	
+	// Pipeline-specific fields
+	JobID          string `json:"job_id,omitempty"`
+	ParentJobID    string `json:"parent_job_id,omitempty"`
+	PipelineStage  string `json:"pipeline_stage,omitempty"`
+	GovID          string `json:"gov_id,omitempty"`
+	StageProgress  string `json:"stage_progress,omitempty"` // "started", "progress", "completed", "failed"
+	DebugContext   map[string]interface{} `json:"debug_context,omitempty"`
 }
 
-// Job represents a scraping job
+// PipelineStageLog tracks detailed information about pipeline stage execution
+type PipelineStageLog struct {
+	JobID         string                 `json:"job_id"`
+	ParentJobID   string                 `json:"parent_job_id,omitempty"`
+	Stage         string                 `json:"stage"`
+	GovID         string                 `json:"gov_id"`
+	Status        string                 `json:"status"` // "started", "running", "completed", "failed", "retrying"
+	StartTime     time.Time              `json:"start_time"`
+	EndTime       *time.Time             `json:"end_time,omitempty"`
+	Duration      string                 `json:"duration,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	RetryCount    int                    `json:"retry_count"`
+	Result        interface{}            `json:"result,omitempty"`
+	DebugData     map[string]interface{} `json:"debug_data,omitempty"`
+	WorkerID      string                 `json:"worker_id,omitempty"`
+}
+
+// SubTaskStatus represents the status of an individual sub-task
+type SubTaskStatus struct {
+	ID          string                 `json:"id"`
+	GovID       string                 `json:"gov_id,omitempty"`
+	Stage       string                 `json:"stage"` // "scrape", "upload", "process", "ingest"
+	Status      JobStatus              `json:"status"`
+	StartedAt   *time.Time             `json:"started_at,omitempty"`
+	CompletedAt *time.Time             `json:"completed_at,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	RetryCount  int                    `json:"retry_count"`
+	Result      interface{}            `json:"result,omitempty"`
+	DebugInfo   map[string]interface{} `json:"debug_info,omitempty"`
+}
+
+// PipelineProgress tracks overall pipeline progress and stage-specific metrics
+type PipelineProgress struct {
+	TotalGovIDs    int                        `json:"total_gov_ids"`
+	CurrentStage   string                     `json:"current_stage"`
+	StageProgress  map[string]StageProgress   `json:"stage_progress"`
+	SubTasks       map[string]SubTaskStatus   `json:"sub_tasks"` // keyed by sub-task ID
+	FailedGovIDs   []string                   `json:"failed_gov_ids"`
+	CompletedGovIDs []string                  `json:"completed_gov_ids"`
+	LastUpdated    time.Time                  `json:"last_updated"`
+}
+
+// StageProgress tracks progress within a specific pipeline stage
+type StageProgress struct {
+	Stage       string    `json:"stage"`
+	Pending     int       `json:"pending"`
+	Running     int       `json:"running"`
+	Completed   int       `json:"completed"`
+	Failed      int       `json:"failed"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// Job represents a scraping job with enhanced pipeline support
 type Job struct {
 	ID          string       `json:"id"`
 	Mode        ScrapingMode `json:"mode"`
@@ -74,6 +141,12 @@ type Job struct {
 	CompletedAt *time.Time   `json:"completed_at,omitempty"`
 	WorkerID    string       `json:"worker_id,omitempty"`
 	
+	// Pipeline-specific fields
+	IsPipeline      bool              `json:"is_pipeline,omitempty"`
+	ParentJobID     string            `json:"parent_job_id,omitempty"`
+	PipelineStage   string            `json:"pipeline_stage,omitempty"`
+	Progress        *PipelineProgress `json:"progress,omitempty"`
+	
 	// Dokito-specific parameters
 	State            string      `json:"state,omitempty"`
 	JurisdictionName string      `json:"jurisdiction_name,omitempty"`
@@ -83,6 +156,12 @@ type Job struct {
 	OperationType    string      `json:"operation_type,omitempty"`
 	Limit            int         `json:"limit,omitempty"`
 	Offset           int         `json:"offset,omitempty"`
+	
+	// Debugging and tracking
+	DebugInfo       map[string]interface{} `json:"debug_info,omitempty"`
+	RetryCount      int                    `json:"retry_count"`
+	MaxRetries      int                    `json:"max_retries"`
+	DependsOn       []string               `json:"depends_on,omitempty"` // job IDs this job depends on
 }
 
 // CreateJobRequest represents the request to create a new job
@@ -92,6 +171,13 @@ type CreateJobRequest struct {
 	DateString string       `json:"date_string,omitempty"`
 	BeginDate  string       `json:"begin_date,omitempty"`
 	EndDate    string       `json:"end_date,omitempty"`
+	
+	// Pipeline-specific parameters
+	IsPipeline      bool     `json:"is_pipeline,omitempty"`
+	ParentJobID     string   `json:"parent_job_id,omitempty"`
+	PipelineStage   string   `json:"pipeline_stage,omitempty"`
+	MaxRetries      int      `json:"max_retries,omitempty"`
+	DependsOn       []string `json:"depends_on,omitempty"`
 	
 	// Dokito-specific parameters
 	State            string      `json:"state,omitempty"`
@@ -267,5 +353,168 @@ type GenericParty struct {
 	Role        string                 `json:"role"`
 	Contact     map[string]interface{} `json:"contact"`
 	Metadata    map[string]interface{} `json:"metadata"`
+}
+
+// ===== PIPELINE-SPECIFIC JOB MODELS =====
+
+// PipelineJob represents a complete pipeline execution with multiple stages
+type PipelineJob struct {
+	*Job // Embed base Job
+	
+	// Pipeline configuration
+	Stages          []string               `json:"stages"`          // ["scrape", "upload", "process", "ingest"]
+	StageConfig     map[string]interface{} `json:"stage_config"`    // Stage-specific configuration
+	AutoAdvance     bool                   `json:"auto_advance"`    // Automatically advance to next stage
+	FailurePolicy   string                 `json:"failure_policy"`  // "abort", "continue", "retry"
+	
+	// Execution tracking
+	CurrentStageIndex int                  `json:"current_stage_index"`
+	CompletedStages   []string             `json:"completed_stages"`
+	FailedStages      []string             `json:"failed_stages"`
+	StageResults      map[string]interface{} `json:"stage_results"`
+	
+	// Error handling and debugging
+	FailureDetails    map[string]FailureDetail `json:"failure_details,omitempty"`
+	RetryHistory      []RetryAttempt           `json:"retry_history,omitempty"`
+	LastHealthCheck   *time.Time               `json:"last_health_check,omitempty"`
+}
+
+// FailureDetail captures comprehensive information about job failures
+type FailureDetail struct {
+	Stage          string                 `json:"stage"`
+	GovID          string                 `json:"gov_id,omitempty"`
+	ErrorCode      string                 `json:"error_code"`
+	ErrorMessage   string                 `json:"error_message"`
+	StackTrace     string                 `json:"stack_trace,omitempty"`
+	Timestamp      time.Time              `json:"timestamp"`
+	WorkerID       string                 `json:"worker_id,omitempty"`
+	
+	// Environmental context
+	SystemInfo     map[string]interface{} `json:"system_info,omitempty"`
+	RequestData    interface{}            `json:"request_data,omitempty"`
+	ResponseData   interface{}            `json:"response_data,omitempty"`
+	
+	// Recovery information
+	IsRetryable    bool                   `json:"is_retryable"`
+	SuggestedFix   string                 `json:"suggested_fix,omitempty"`
+	RelatedIssues  []string               `json:"related_issues,omitempty"`
+	
+	// Debugging context
+	DebugSnapshot  map[string]interface{} `json:"debug_snapshot,omitempty"`
+}
+
+// RetryAttempt tracks information about retry attempts
+type RetryAttempt struct {
+	AttemptNumber  int                    `json:"attempt_number"`
+	Timestamp      time.Time              `json:"timestamp"`
+	Reason         string                 `json:"reason"`
+	Stage          string                 `json:"stage,omitempty"`
+	GovID          string                 `json:"gov_id,omitempty"`
+	Result         string                 `json:"result"` // "success", "failure", "partial"
+	Duration       string                 `json:"duration,omitempty"`
+	ErrorMessage   string                 `json:"error_message,omitempty"`
+	ChangesApplied []string               `json:"changes_applied,omitempty"`
+}
+
+// ScraperTaskConfig configures scraping tasks for NY PUC
+type ScraperTaskConfig struct {
+	Jurisdiction     string            `json:"jurisdiction"`      // "ny_puc"
+	State           string            `json:"state"`             // "ny"
+	ScrapingMode    string            `json:"scraping_mode"`     // "full", "metadata", "documents", "parties"
+	MaxConcurrent   int               `json:"max_concurrent"`    // Maximum concurrent scrapers
+	TimeoutSeconds  int               `json:"timeout_seconds"`   // Timeout per gov ID
+	RetryPolicy     RetryPolicy       `json:"retry_policy"`      // Retry configuration
+	
+	// NY PUC specific settings
+	BrowserConfig   map[string]interface{} `json:"browser_config,omitempty"`
+	PageLoadTimeout int                   `json:"page_load_timeout,omitempty"`
+	ElementTimeout  int                   `json:"element_timeout,omitempty"`
+}
+
+// UploadTaskConfig configures upload tasks to dokito backend
+type UploadTaskConfig struct {
+	BackendURL      string      `json:"backend_url"`
+	ProcessingAction string     `json:"processing_action"` // "process_only", "process_and_ingest", "upload_raw"
+	BatchSize       int         `json:"batch_size"`        // Number of dockets per batch
+	TimeoutSeconds  int         `json:"timeout_seconds"`
+	RetryPolicy     RetryPolicy `json:"retry_policy"`
+	
+	// Validation settings
+	ValidateData    bool        `json:"validate_data"`
+	RequiredFields  []string    `json:"required_fields,omitempty"`
+}
+
+// ProcessTaskConfig configures processing tasks in dokito backend
+type ProcessTaskConfig struct {
+	BackendURL     string      `json:"backend_url"`
+	ProcessingType string      `json:"processing_type"` // "govid", "jurisdiction", "daterange"
+	BatchSize      int         `json:"batch_size"`
+	TimeoutSeconds int         `json:"timeout_seconds"`
+	RetryPolicy    RetryPolicy `json:"retry_policy"`
+	
+	// Processing options
+	ProcessOnly    bool `json:"process_only"`
+	IngestOnly     bool `json:"ingest_only"`
+	FullOperation  bool `json:"full_operation"`
+}
+
+// RetryPolicy defines how failures should be retried
+type RetryPolicy struct {
+	MaxRetries      int           `json:"max_retries"`
+	InitialDelay    time.Duration `json:"initial_delay"`
+	MaxDelay        time.Duration `json:"max_delay"`
+	BackoffFactor   float64       `json:"backoff_factor"`
+	RetryableErrors []string      `json:"retryable_errors,omitempty"`
+}
+
+// TaskResult represents the result of a single task execution
+type TaskResult struct {
+	TaskID        string                 `json:"task_id"`
+	Stage         string                 `json:"stage"`
+	GovID         string                 `json:"gov_id,omitempty"`
+	Status        string                 `json:"status"` // "success", "failure", "partial"
+	StartTime     time.Time              `json:"start_time"`
+	EndTime       time.Time              `json:"end_time"`
+	Duration      time.Duration          `json:"duration"`
+	
+	// Result data
+	Data          interface{}            `json:"data,omitempty"`
+	RecordsCount  int                    `json:"records_count,omitempty"`
+	ProcessedIDs  []string               `json:"processed_ids,omitempty"`
+	FailedIDs     []string               `json:"failed_ids,omitempty"`
+	
+	// Error information
+	Error         string                 `json:"error,omitempty"`
+	ErrorCode     string                 `json:"error_code,omitempty"`
+	WarningCount  int                    `json:"warning_count,omitempty"`
+	Warnings      []string               `json:"warnings,omitempty"`
+	
+	// Performance metrics
+	Metrics       map[string]interface{} `json:"metrics,omitempty"`
+	ResourceUsage map[string]interface{} `json:"resource_usage,omitempty"`
+}
+
+// CreatePipelineJobRequest represents a request to create a pipeline job
+type CreatePipelineJobRequest struct {
+	// Basic job information
+	GovIDs           []string `json:"gov_ids" binding:"required"`
+	State            string   `json:"state" binding:"required"`
+	JurisdictionName string   `json:"jurisdiction_name" binding:"required"`
+	
+	// Pipeline configuration
+	PipelineType     string                 `json:"pipeline_type" binding:"required"` // "ingest", "upload", "process"
+	Stages           []string               `json:"stages,omitempty"`
+	AutoAdvance      bool                   `json:"auto_advance"`
+	FailurePolicy    string                 `json:"failure_policy,omitempty"`
+	
+	// Stage configurations
+	ScraperConfig    *ScraperTaskConfig     `json:"scraper_config,omitempty"`
+	UploadConfig     *UploadTaskConfig      `json:"upload_config,omitempty"`
+	ProcessConfig    *ProcessTaskConfig     `json:"process_config,omitempty"`
+	
+	// Global settings
+	MaxRetries       int                    `json:"max_retries,omitempty"`
+	TimeoutMinutes   int                    `json:"timeout_minutes,omitempty"`
+	Priority         int                    `json:"priority,omitempty"`
 }
 

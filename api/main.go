@@ -97,6 +97,21 @@ func startGinServer(server *Server) {
 		// Queue status
 		api.GET("/queue/status", server.GetQueueStatus)
 		
+		// Pipeline endpoints
+		api.POST("/pipeline/jobs", server.CreatePipelineJob)
+		api.GET("/pipeline/jobs/:id/progress", server.GetPipelineJobProgress)
+		api.GET("/pipeline/jobs/:id/stages/:stage", server.GetPipelineStageDetails)
+		api.POST("/pipeline/jobs/:id/stages/:stage/retry", server.RetryPipelineStage)
+		api.PUT("/pipeline/jobs/:id/cancel", server.CancelPipelineJob)
+		api.GET("/pipeline/queue/status", server.GetEnhancedQueueStatus)
+		
+		// Debugging and monitoring endpoints
+		api.GET("/debug/pipeline/:id", server.GetPipelineDebugInfo)
+		api.GET("/debug/pipeline/:id/failures", server.GetFailureReport)
+		api.GET("/debug/pipeline/:id/dependencies", server.GetTaskDependencyGraph)
+		api.GET("/debug/performance", server.GetPerformanceMetrics)
+		api.GET("/debug/health", server.GetSystemHealth)
+		
 		// Job scanning
 		api.GET("/jobs/scan", server.ScanJobs)
 		

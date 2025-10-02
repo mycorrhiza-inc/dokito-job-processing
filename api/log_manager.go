@@ -20,15 +20,26 @@ type LogFileEntry struct {
 	Metadata  map[string]interface{} `json:"metadata"`
 }
 
-// LogManager handles file-based log operations
+// LogManager handles file-based log operations with pipeline support
 type LogManager struct {
-	LogsDirectory string
+	LogsDirectory    string
+	PipelineLogsDir  string
+	StageLogsDir     string
 }
 
 // NewLogManager creates a new log manager instance
 func NewLogManager(logsDir string) *LogManager {
+	pipelineLogsDir := filepath.Join(logsDir, "pipeline")
+	stageLogsDir := filepath.Join(logsDir, "stages")
+	
+	// Create directories if they don't exist
+	os.MkdirAll(pipelineLogsDir, 0755)
+	os.MkdirAll(stageLogsDir, 0755)
+	
 	return &LogManager{
-		LogsDirectory: logsDir,
+		LogsDirectory:   logsDir,
+		PipelineLogsDir: pipelineLogsDir,
+		StageLogsDir:    stageLogsDir,
 	}
 }
 
@@ -213,6 +224,203 @@ func (lm *LogManager) CleanupOldLogs(maxAge time.Duration) (int, error) {
 	}
 
 	return deletedCount, nil
+}
+
+// LogPipelineStage logs a detailed pipeline stage event
+func (lm *LogManager) LogPipelineStage(stageLog *PipelineStageLog) error {
+	// Create stage-specific log file
+	stageLogFile := filepath.Join(lm.StageLogsDir, fmt.Sprintf("%s-%s.log", stageLog.ParentJobID, stageLog.Stage))
+	
+	// Calculate duration if end time is set
+	if stageLog.EndTime != nil {
+		duration := stageLog.EndTime.Sub(stageLog.StartTime)
+		stageLog.Duration = duration.String()
+	}
+	
+	// Marshal to JSON
+	logData, err := json.Marshal(stageLog)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pipeline stage log: %w", err)
+	}
+	
+	// Append to stage log file
+	file, err := os.OpenFile(stageLogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open stage log file: %w", err)
+	}
+	defer file.Close()
+	
+	_, err = file.WriteString(string(logData) + "\n")
+	if err != nil {
+		return fmt.Errorf("failed to write stage log: %w", err)
+	}
+	
+	return nil
+}
+
+// LogPipelineEvent logs a general pipeline event with enhanced context
+func (lm *LogManager) LogPipelineEvent(jobID, parentJobID, stage, govID, message string, level LogLevel, debugContext map[string]interface{}) error {
+	logEntry := &LogEntry{
+		ID:            fmt.Sprintf("%s-%d", jobID, time.Now().UnixNano()),
+		Timestamp:     time.Now(),
+		Level:         level,
+		Message:       message,
+		JobID:         jobID,
+		ParentJobID:   parentJobID,
+		PipelineStage: stage,
+		GovID:         govID,
+		DebugContext:  debugContext,
+	}
+	
+	// Write to job-specific log file
+	jobLogFile := lm.GetJobLogFile(jobID)
+	logData, err := json.Marshal(logEntry)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pipeline log entry: %w", err)
+	}
+	
+	file, err := os.OpenFile(jobLogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open job log file: %w", err)
+	}
+	defer file.Close()
+	
+	_, err = file.WriteString(string(logData) + "\n")
+	if err != nil {
+		return fmt.Errorf("failed to write pipeline log: %w", err)
+	}
+	
+	// Also write to pipeline-specific log for aggregated view
+	if parentJobID != "" {
+		pipelineLogFile := filepath.Join(lm.PipelineLogsDir, fmt.Sprintf("%s.log", parentJobID))
+		pipelineFile, err := os.OpenFile(pipelineLogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			pipelineFile.WriteString(string(logData) + "\n")
+			pipelineFile.Close()
+		}
+	}
+	
+	return nil
+}
+
+// GetPipelineStageLog retrieves the stage log for a specific pipeline and stage
+func (lm *LogManager) GetPipelineStageLog(parentJobID, stage string) ([]*PipelineStageLog, error) {
+	stageLogFile := filepath.Join(lm.StageLogsDir, fmt.Sprintf("%s-%s.log", parentJobID, stage))
+	
+	file, err := os.Open(stageLogFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []*PipelineStageLog{}, nil
+		}
+		return nil, fmt.Errorf("failed to open stage log file: %w", err)
+	}
+	defer file.Close()
+	
+	var stageLogs []*PipelineStageLog
+	scanner := bufio.NewScanner(file)
+	
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		
+		var stageLog PipelineStageLog
+		if err := json.Unmarshal([]byte(line), &stageLog); err != nil {
+			continue // Skip malformed lines
+		}
+		
+		stageLogs = append(stageLogs, &stageLog)
+	}
+	
+	return stageLogs, scanner.Err()
+}
+
+// GetPipelineOverview gets an overview of all stages for a pipeline job
+func (lm *LogManager) GetPipelineOverview(parentJobID string) (map[string][]*PipelineStageLog, error) {
+	overview := make(map[string][]*PipelineStageLog)
+	
+	// Read pipeline logs directory for this job
+	pattern := filepath.Join(lm.StageLogsDir, fmt.Sprintf("%s-*.log", parentJobID))
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("failed to glob stage log files: %w", err)
+	}
+	
+	for _, file := range files {
+		// Extract stage name from filename
+		filename := filepath.Base(file)
+		parts := strings.Split(filename, "-")
+		if len(parts) < 2 {
+			continue
+		}
+		stage := strings.TrimSuffix(strings.Join(parts[1:], "-"), ".log")
+		
+		stageLogs, err := lm.GetPipelineStageLog(parentJobID, stage)
+		if err != nil {
+			continue // Skip files with errors
+		}
+		
+		overview[stage] = stageLogs
+	}
+	
+	return overview, nil
+}
+
+// GetPipelineProgress calculates progress metrics for a pipeline job
+func (lm *LogManager) GetPipelineProgress(parentJobID string) (*PipelineProgress, error) {
+	overview, err := lm.GetPipelineOverview(parentJobID)
+	if err != nil {
+		return nil, err
+	}
+	
+	progress := &PipelineProgress{
+		StageProgress:   make(map[string]StageProgress),
+		SubTasks:        make(map[string]SubTaskStatus),
+		FailedGovIDs:    make([]string, 0),
+		CompletedGovIDs: make([]string, 0),
+		LastUpdated:     time.Now(),
+	}
+	
+	allGovIDs := make(map[string]bool)
+	
+	// Process each stage
+	for stage, stageLogs := range overview {
+		stageProgress := StageProgress{
+			Stage: stage,
+		}
+		
+		for _, stageLog := range stageLogs {
+			allGovIDs[stageLog.GovID] = true
+			
+			switch stageLog.Status {
+			case "started", "running":
+				stageProgress.Running++
+			case "completed":
+				stageProgress.Completed++
+			case "failed":
+				stageProgress.Failed++
+			default:
+				stageProgress.Pending++
+			}
+			
+			// Track first start time for stage
+			if stageProgress.StartedAt == nil || stageLog.StartTime.Before(*stageProgress.StartedAt) {
+				stageProgress.StartedAt = &stageLog.StartTime
+			}
+			
+			// Track latest completion time for stage
+			if stageLog.EndTime != nil && (stageProgress.CompletedAt == nil || stageLog.EndTime.After(*stageProgress.CompletedAt)) {
+				stageProgress.CompletedAt = stageLog.EndTime
+			}
+		}
+		
+		progress.StageProgress[stage] = stageProgress
+	}
+	
+	progress.TotalGovIDs = len(allGovIDs)
+	
+	return progress, nil
 }
 
 // GetLogDirectoryStats returns statistics about the logs directory
