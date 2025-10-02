@@ -108,7 +108,9 @@ func startGinServer(server *Server) {
 		dokito := api.Group("/dokito/admin/docket-process")
 		{
 			dokito.POST("/:state/:jurisdiction/raw-dockets", server.SubmitRawDockets)
-			dokito.POST("/:state/:jurisdiction/by-ids", server.ProcessDocketsByIds)
+			dokito.POST("/:state/:jurisdiction/govid/process", server.ProcessDocketsByGovId)
+			dokito.POST("/:state/:jurisdiction/govid/ingest", server.IngestDocketsByGovId)
+			dokito.POST("/:state/:jurisdiction/govid/full", server.ProcessAndIngestDocketsByGovId)
 			dokito.POST("/:state/:jurisdiction/by-jurisdiction", server.ProcessDocketsByJurisdiction)
 			dokito.POST("/:state/:jurisdiction/by-daterange", server.ProcessDocketsByDateRange)
 		}

@@ -801,8 +801,8 @@ func (s *Server) SubmitRawDockets(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// ProcessDocketsByIds handles processing dockets by their IDs
-func (s *Server) ProcessDocketsByIds(c *gin.Context) {
+// ProcessDocketsByGovId handles processing dockets by their government IDs (process only)
+func (s *Server) ProcessDocketsByGovId(c *gin.Context) {
 	state := c.Param("state")
 	jurisdiction := c.Param("jurisdiction")
 	
@@ -817,19 +817,71 @@ func (s *Server) ProcessDocketsByIds(c *gin.Context) {
 		return
 	}
 
-	// Validate action type for ID-only endpoints
-	if err := validateIdOnlyAction(string(req.Action)); err != nil {
+	log.Printf("Processing %d dockets by gov IDs for %s/%s", 
+		len(req.DocketIds), state, jurisdiction)
+
+	response, err := s.dokitoClient.ProcessByGovId(c.Request.Context(), state, jurisdiction, &req)
+	if err != nil {
+		log.Printf("Error processing dockets by gov IDs: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to process dockets: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// IngestDocketsByGovId handles ingesting dockets by their government IDs (ingest only)
+func (s *Server) IngestDocketsByGovId(c *gin.Context) {
+	state := c.Param("state")
+	jurisdiction := c.Param("jurisdiction")
+	
+	if state == "" || jurisdiction == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "State and jurisdiction are required"})
+		return
+	}
+
+	var req ByIdsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	log.Printf("Processing %d dockets by IDs for %s/%s with action: %s", 
-		len(req.DocketIds), state, jurisdiction, req.Action)
+	log.Printf("Ingesting %d dockets by gov IDs for %s/%s", 
+		len(req.DocketIds), state, jurisdiction)
 
-	response, err := s.dokitoClient.ProcessByIds(c.Request.Context(), state, jurisdiction, &req)
+	response, err := s.dokitoClient.IngestByGovId(c.Request.Context(), state, jurisdiction, &req)
 	if err != nil {
-		log.Printf("Error processing dockets by IDs: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to process dockets: %v", err)})
+		log.Printf("Error ingesting dockets by gov IDs: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to ingest dockets: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// ProcessAndIngestDocketsByGovId handles processing and ingesting dockets by their government IDs (full operation)
+func (s *Server) ProcessAndIngestDocketsByGovId(c *gin.Context) {
+	state := c.Param("state")
+	jurisdiction := c.Param("jurisdiction")
+	
+	if state == "" || jurisdiction == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "State and jurisdiction are required"})
+		return
+	}
+
+	var req ByIdsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	log.Printf("Processing and ingesting %d dockets by gov IDs for %s/%s", 
+		len(req.DocketIds), state, jurisdiction)
+
+	response, err := s.dokitoClient.ProcessAndIngestByGovId(c.Request.Context(), state, jurisdiction, &req)
+	if err != nil {
+		log.Printf("Error processing and ingesting dockets by gov IDs: %v", err)
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: fmt.Sprintf("Failed to process and ingest dockets: %v", err)})
 		return
 	}
 

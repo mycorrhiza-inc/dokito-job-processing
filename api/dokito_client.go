@@ -123,9 +123,45 @@ func (d *DokitoClient) SubmitRawDockets(ctx context.Context, state, jurisdiction
 	return &result, nil
 }
 
-// ProcessByIds processes dockets by their IDs
-func (d *DokitoClient) ProcessByIds(ctx context.Context, state, jurisdiction string, request *ByIdsRequest) (*ProcessingResponse, error) {
-	endpoint := fmt.Sprintf("/admin/docket-process/%s/%s/by-ids",
+// ProcessByGovId processes dockets by their government IDs (process only)
+func (d *DokitoClient) ProcessByGovId(ctx context.Context, state, jurisdiction string, request *ByIdsRequest) (*ProcessingResponse, error) {
+	endpoint := fmt.Sprintf("/admin/docket-process/%s/%s/govid/process",
+		url.PathEscape(state), url.PathEscape(jurisdiction))
+
+	resp, err := d.makeRequest(ctx, "POST", endpoint, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var result ProcessingResponse
+	if err := d.parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// IngestByGovId ingests dockets by their government IDs (ingest only)
+func (d *DokitoClient) IngestByGovId(ctx context.Context, state, jurisdiction string, request *ByIdsRequest) (*ProcessingResponse, error) {
+	endpoint := fmt.Sprintf("/admin/docket-process/%s/%s/govid/ingest",
+		url.PathEscape(state), url.PathEscape(jurisdiction))
+
+	resp, err := d.makeRequest(ctx, "POST", endpoint, request)
+	if err != nil {
+		return nil, err
+	}
+
+	var result ProcessingResponse
+	if err := d.parseResponse(resp, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// ProcessAndIngestByGovId processes and ingests dockets by their government IDs (full operation)
+func (d *DokitoClient) ProcessAndIngestByGovId(ctx context.Context, state, jurisdiction string, request *ByIdsRequest) (*ProcessingResponse, error) {
+	endpoint := fmt.Sprintf("/admin/docket-process/%s/%s/govid/full",
 		url.PathEscape(state), url.PathEscape(jurisdiction))
 
 	resp, err := d.makeRequest(ctx, "POST", endpoint, request)

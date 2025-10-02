@@ -164,8 +164,7 @@ type RawDocketsRequest struct {
 
 // ByIdsRequest represents a request to process dockets by IDs
 type ByIdsRequest struct {
-	Action    ProcessingActionIdOnly `json:"action" binding:"required"`
-	DocketIds []string               `json:"docket_ids" binding:"required"`
+	DocketIds []string `json:"docket_ids" binding:"required"`
 }
 
 // ByJurisdictionRequest represents a request to process all dockets in a jurisdiction
