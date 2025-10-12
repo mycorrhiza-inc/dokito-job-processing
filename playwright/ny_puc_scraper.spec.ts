@@ -10,6 +10,9 @@ import { Browser, chromium } from "playwright";
 import { runCli } from "./cli_runner";
 import * as cheerio from "cheerio";
 import * as fs from "fs";
+import * as fsPromises from "fs/promises";
+import * as path from "path";
+import * as crypto from "crypto";
 
 enum ScrapingMode {
   METADATA = "meta",
@@ -74,6 +77,229 @@ class NyPucScraper {
     );
   }
 
+  private calculateBlake2Hash(content: string): string {
+    return crypto.createHash('blake2b512').update(content).digest('hex');
+  }
+
+  private async updateMetadataJson(
+    directory: string,
+    filename: string,
+    metadata: {
+      filename: string;
+      blake2_hash: string;
+      url: string;
+      stage: string;
+      saved_at: string;
+      file_size: number;
+      parsed_data?: any;
+    }
+  ): Promise<void> {
+    const metadataPath = path.join(directory, 'metadata.json');
+
+    let existingMetadata: Record<string, any> = {};
+    try {
+      const content = await fsPromises.readFile(metadataPath, 'utf-8');
+      existingMetadata = JSON.parse(content);
+    } catch (error) {
+      // File doesn't exist or is invalid, start with empty object
+    }
+
+    existingMetadata[filename] = metadata;
+
+    await fsPromises.writeFile(
+      metadataPath,
+      JSON.stringify(existingMetadata, null, 2),
+      'utf-8'
+    );
+  }
+
+  private async findCachedParsedData(
+    url: string,
+    stage: string,
+    currentHash: string
+  ): Promise<any | null> {
+    try {
+      // Parse URL to build directory path
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname;
+      const pathname = urlObj.pathname;
+
+      const pathParts = pathname.split('/').filter(part => part.length > 0);
+      pathParts.pop(); // Remove filename
+      const directoryPath = pathParts.join('/');
+
+      const fullDirectory = path.join(
+        process.cwd(),
+        'raw',
+        'ny',
+        'puc',
+        hostname,
+        directoryPath
+      );
+
+      const metadataPath = path.join(fullDirectory, 'metadata.json');
+
+      // Try to read metadata.json
+      const content = await fsPromises.readFile(metadataPath, 'utf-8');
+      const metadata: Record<string, any> = JSON.parse(content);
+
+      // Search for entries matching URL, stage, and hash
+      for (const [filename, entry] of Object.entries(metadata)) {
+        if (
+          entry.url === url &&
+          entry.stage === stage &&
+          entry.blake2_hash === currentHash &&
+          entry.parsed_data !== undefined
+        ) {
+          console.log(`Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+          return entry.parsed_data;
+        }
+      }
+
+      console.log(`Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+      return null;
+    } catch (error) {
+      // File doesn't exist or other error - cache miss
+      console.log(`Cache MISS for ${stage} at ${url} (no metadata file)`);
+      return null;
+    }
+  }
+
+  private async saveParsedDataToCache(
+    url: string,
+    stage: string,
+    hash: string,
+    parsedData: any
+  ): Promise<void> {
+    try {
+      // Parse URL to build directory path
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname;
+      const pathname = urlObj.pathname;
+
+      const pathParts = pathname.split('/').filter(part => part.length > 0);
+      pathParts.pop(); // Remove filename
+      const directoryPath = pathParts.join('/');
+
+      const fullDirectory = path.join(
+        process.cwd(),
+        'raw',
+        'ny',
+        'puc',
+        hostname,
+        directoryPath
+      );
+
+      const metadataPath = path.join(fullDirectory, 'metadata.json');
+
+      // Read existing metadata
+      let metadata: Record<string, any> = {};
+      try {
+        const content = await fsPromises.readFile(metadataPath, 'utf-8');
+        metadata = JSON.parse(content);
+      } catch (error) {
+        // File doesn't exist yet, that's okay
+      }
+
+      // Find the most recent entry matching URL, stage, and hash
+      let targetEntry: any = null;
+      let targetFilename: string | null = null;
+      let latestTimestamp: string | null = null;
+
+      for (const [filename, entry] of Object.entries(metadata)) {
+        if (
+          entry.url === url &&
+          entry.stage === stage &&
+          entry.blake2_hash === hash
+        ) {
+          if (!latestTimestamp || entry.saved_at > latestTimestamp) {
+            targetEntry = entry;
+            targetFilename = filename;
+            latestTimestamp = entry.saved_at;
+          }
+        }
+      }
+
+      // Update the entry with parsed data
+      if (targetFilename && targetEntry) {
+        targetEntry.parsed_data = parsedData;
+        metadata[targetFilename] = targetEntry;
+
+        await fsPromises.writeFile(
+          metadataPath,
+          JSON.stringify(metadata, null, 2),
+          'utf-8'
+        );
+
+        console.log(`Saved parsed data to cache for ${stage} at ${url}`);
+      } else {
+        console.warn(`Could not find metadata entry to update for ${stage} at ${url}`);
+      }
+    } catch (error) {
+      console.error(`Failed to save parsed data to cache for ${url}:`, error);
+    }
+  }
+
+  private async saveHtmlSnapshot(
+    html: string,
+    url: string,
+    stage: string
+  ): Promise<void> {
+    try {
+      // Parse URL
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname;
+      const pathname = urlObj.pathname;
+      const query = urlObj.search;
+
+      // Split pathname to get directory and filename
+      const pathParts = pathname.split('/').filter(part => part.length > 0);
+      const filename = pathParts.pop() || 'index.html';
+      const directoryPath = pathParts.join('/');
+
+      // Build full directory path
+      const fullDirectory = path.join(
+        process.cwd(),
+        'raw',
+        'ny',
+        'puc',
+        hostname,
+        directoryPath
+      );
+
+      // Create directory if it doesn't exist
+      await fsPromises.mkdir(fullDirectory, { recursive: true });
+
+      // Escape forward slashes in query
+      const escapedQuery = query.replace(/\//g, '\\/');
+
+      // Build filename with timestamp and stage
+      const timestamp = new Date().toISOString();
+      const fullFilename = `${filename}\\${escapedQuery}--${timestamp}--${stage}.html`;
+
+      // Calculate hash
+      const blake2Hash = this.calculateBlake2Hash(html);
+
+      // Write HTML file
+      const fullPath = path.join(fullDirectory, fullFilename);
+      await fsPromises.writeFile(fullPath, html, 'utf-8');
+
+      // Update metadata.json
+      await this.updateMetadataJson(fullDirectory, fullFilename, {
+        filename: fullFilename,
+        blake2_hash: blake2Hash,
+        url: url,
+        stage: stage,
+        saved_at: timestamp,
+        file_size: Buffer.byteLength(html, 'utf-8')
+      });
+
+      console.log(`Saved HTML snapshot: ${fullPath}`);
+    } catch (error) {
+      console.error(`Failed to save HTML snapshot for ${url}:`, error);
+    }
+  }
+
   async processTasksWithQueue<T, R>(
     tasks: T[],
     taskProcessor: (task: T) => Promise<R>,
@@ -136,7 +362,7 @@ class NyPucScraper {
     });
   }
 
-  async getPage(url: string): Promise<any> {
+  async getPage(url: string, stage?: string): Promise<any> {
     this.urlTable[url] = url;
     const cached = this.pageCache[url];
     if (cached !== undefined) {
@@ -166,6 +392,11 @@ class NyPucScraper {
 
         console.log(`Getting page content at ${url}...`);
         const html = await page.content();
+
+        // Save HTML snapshot if stage is provided
+        if (stage) {
+          await this.saveHtmlSnapshot(html, url, stage);
+        }
 
         const $ = cheerio.load(html);
         this.pageCache[url] = $;
@@ -205,9 +436,20 @@ class NyPucScraper {
   }
 
   async getCasesAt(url: string): Promise<Partial<RawGenericDocket>[]> {
-    const cases: Partial<RawGenericDocket>[] = [];
     console.log(`Navigating to ${url}`);
-    const $ = await this.getPage(url);
+    const $ = await this.getPage(url, "search-results");
+
+    // Calculate hash for cache check
+    const html = $.html();
+    const htmlHash = this.calculateBlake2Hash(html);
+
+    // Check cache first
+    const cachedData = await this.findCachedParsedData(url, "search-results", htmlHash);
+    if (cachedData) {
+      return cachedData;
+    }
+
+    const cases: Partial<RawGenericDocket>[] = [];
 
     console.log("Extracting industry affected...");
     let industry_affected = $("#GridPlaceHolder_lblSearchCriteriaValue")
@@ -252,6 +494,10 @@ class NyPucScraper {
         console.log(`Successfully extracted case: ${case_govid}`);
       }
     });
+
+    // Save parsed data to cache
+    await this.saveParsedDataToCache(url, "search-results", htmlHash, cases);
+
     return cases;
   }
 
@@ -328,10 +574,21 @@ class NyPucScraper {
     if (basicMetadata && (basicMetadata.industry === "Unknown" || !basicMetadata.industry)) {
       try {
         const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${gov_id}`;
-        const casePageHtml = await this.getPage(caseUrl);
+        const casePageHtml = await this.getPage(caseUrl, "case-metadata");
         const html = casePageHtml.html();
-        const industry = await this.scrapeIndustryAffectedFromFillingsHtml(html);
-        basicMetadata.industry = industry;
+        const htmlHash = this.calculateBlake2Hash(html);
+
+        // Check cache first
+        const cachedIndustry = await this.findCachedParsedData(caseUrl, "case-metadata", htmlHash);
+        if (cachedIndustry) {
+          basicMetadata.industry = cachedIndustry;
+        } else {
+          const industry = await this.scrapeIndustryAffectedFromFillingsHtml(html);
+          basicMetadata.industry = industry;
+
+          // Save industry to cache
+          await this.saveParsedDataToCache(caseUrl, "case-metadata", htmlHash, industry);
+        }
       } catch (error) {
         console.error(`Failed to extract industry from case page for ${gov_id}:`, error);
       }
@@ -448,7 +705,17 @@ class NyPucScraper {
   } | null> {
     try {
       console.log(`Fetching filing metadata from: ${filingUrl}`);
-      const $ = await this.getPage(filingUrl);
+      const $ = await this.getPage(filingUrl, "filing-detail");
+
+      // Calculate hash for cache check
+      const html = $.html();
+      const htmlHash = this.calculateBlake2Hash(html);
+
+      // Check cache first
+      const cachedData = await this.findCachedParsedData(filingUrl, "filing-detail", htmlHash);
+      if (cachedData) {
+        return cachedData;
+      }
 
       const filingInfo = $("#filing_info");
       if (filingInfo.length === 0) {
@@ -491,6 +758,10 @@ class NyPucScraper {
       }
 
       console.log(`Extracted filing metadata:`, metadata);
+
+      // Save parsed data to cache
+      await this.saveParsedDataToCache(filingUrl, "filing-detail", htmlHash, metadata);
+
       return metadata;
     } catch (error) {
       console.error(
@@ -734,12 +1005,30 @@ class NyPucScraper {
       } catch { } // Ignore timeout, just means no documents table
 
       const documentsHtml = await page.content();
+
+      // Calculate hash for cache check
+      const htmlHash = this.calculateBlake2Hash(documentsHtml);
+
+      // Check cache first
+      const cachedData = await this.findCachedParsedData(caseUrl, "case-filings", htmlHash);
+      if (cachedData) {
+        await windowContext.close();
+        return cachedData;
+      }
+
+      // Save HTML snapshot
+      await this.saveHtmlSnapshot(documentsHtml, caseUrl, "case-filings");
+
       const documents = await this.scrapeDocumentsFromHtml(
         documentsHtml,
         docsTableSelector,
         page.url(),
         govId,
       );
+
+      // Save parsed data to cache
+      await this.saveParsedDataToCache(caseUrl, "case-filings", htmlHash, documents);
+
       await windowContext.close();
 
       return documents;
@@ -794,7 +1083,25 @@ class NyPucScraper {
       );
 
       const partiesHtml = await page.content();
+
+      // Calculate hash for cache check
+      const htmlHash = this.calculateBlake2Hash(partiesHtml);
+
+      // Check cache first
+      const cachedData = await this.findCachedParsedData(caseUrl, "case-parties", htmlHash);
+      if (cachedData) {
+        await windowContext.close();
+        return cachedData;
+      }
+
+      // Save HTML snapshot
+      await this.saveHtmlSnapshot(partiesHtml, caseUrl, "case-parties");
+
       const parties = await this.scrapePartiesFromHtml(partiesHtml);
+
+      // Save parsed data to cache
+      await this.saveParsedDataToCache(caseUrl, "case-parties", htmlHash, parties);
+
       await windowContext.close();
       return parties;
     } catch (error) {
