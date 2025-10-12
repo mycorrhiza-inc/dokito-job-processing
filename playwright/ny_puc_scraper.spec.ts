@@ -417,7 +417,6 @@ class NyPucScraper {
     dateFiled?: string;
     filingNo?: string;
     filingOnBehalfOf?: string;
-    caseNumber?: string;
   } | null> {
     try {
       console.log(`Fetching filing metadata from: ${filingUrl}`);
@@ -430,12 +429,6 @@ class NyPucScraper {
       }
 
       const metadata: any = {};
-
-      // Extract Case Number from Matter/Case Details section
-      const caseNumberElement = $("#lblCaseNoval");
-      if (caseNumberElement.length > 0) {
-        metadata.caseNumber = caseNumberElement.text().trim();
-      }
 
       // Extract Description of Filing
       const descriptionElement = filingInfo.find("#lblDescriptionofFilingval");
@@ -509,11 +502,6 @@ class NyPucScraper {
           } catch (dateError) {
             console.warn(`Invalid date format for filing ${filing.filing_govid}: ${metadata.dateFiled}`);
           }
-        }
-
-        // Map caseNumber to filing_govid
-        if (metadata.caseNumber) {
-          filing.filing_govid = metadata.caseNumber;
         }
 
         // Keep organization filing on behalf of data
@@ -613,6 +601,7 @@ class NyPucScraper {
     html: string,
     tableSelector: string,
     url: string,
+    caseGovId: string,
   ): Promise<RawGenericFiling[]> {
     console.log("Starting document extraction from HTML...");
     const $ = cheerio.load(html);
@@ -666,7 +655,8 @@ class NyPucScraper {
             description: "",
             attachments: [],
             extra_metadata: { fileName },
-            filing_govid: filingNo,
+            filing_govid: caseGovId,
+            filing_number: filingNo,
           });
         }
 
@@ -720,6 +710,7 @@ class NyPucScraper {
         documentsHtml,
         docsTableSelector,
         page.url(),
+        govId,
       );
       await windowContext.close();
 
