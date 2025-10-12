@@ -3,7 +3,7 @@ import * as path from "path";
 
 interface Filing {
   filed_date: string;
-  filling_govid: string;
+  filing_govid: string;
   name: string;
   organization_author_blob: string[];
   individual_author_blob: string[];

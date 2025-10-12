@@ -234,7 +234,7 @@ async function scrapeFilingsFromCurrentPage(
 
       const filing = {
         filed_date: docDate.trim(),
-        filling_govid: "",
+        filing_govid: "",
         name: docRegarding.trim(),
         organization_author_blob: [docTo],
         individual_author_blob: [docFrom],

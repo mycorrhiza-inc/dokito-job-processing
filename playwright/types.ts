@@ -36,8 +36,8 @@ export interface RawGenericAttachment {
 
 export interface RawGenericFiling {
   filed_date?: string | null; // or Date
-  filling_govid: string;
-  filling_url: string;
+  filing_govid: string;
+  filing_url: string;
   name: string;
   organization_authors: string[];
   individual_authors: string[];

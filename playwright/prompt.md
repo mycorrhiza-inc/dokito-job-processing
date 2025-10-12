@@ -55,6 +55,6 @@ please make it so that the function
   }
 ```
 
-always returns a list of Partial<RawGenericDocket>. For the parties and fillings only modes, it should just return an object of the form {"case_govid": govid, "fillings": fillings}.
+always returns a list of Partial<RawGenericDocket>. For the parties and filing only modes, it should just return an object of the form {"case_govid": govid, "filing": filing}.
 
 Also the concurrency for this seems kinda sloppy right now with process with queue being handled in each of the seperate functions, for reference scrapeMetadataOnly, scrapePartiesOnly and scrapeDocumentsOnly should not have built in concurrency and only operate on a single govid. If there is any concurrency it should be handled directly in the scrapeByGovIds function.

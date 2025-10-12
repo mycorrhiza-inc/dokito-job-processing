@@ -29,7 +29,7 @@ import * as fs from "fs";
 
 enum ScrapingMode {
   METADATA = "meta",
-  FILLINGS = "fillings",
+  filing = "filing",
   PARTIES = "parties",
   ALL = "all",
 }
@@ -404,7 +404,7 @@ class NyPucScraper {
     return parties;
   }
 
-  async fetchFilingMetadata(fillingUrl: string): Promise<{
+  async fetchFilingMetadata(filingUrl: string): Promise<{
     description?: string;
     filedBy?: string;
     dateFiled?: string;
@@ -412,8 +412,8 @@ class NyPucScraper {
     filingOnBehalfOf?: string;
   } | null> {
     try {
-      console.log(`Fetching filing metadata from: ${fillingUrl}`);
-      const $ = await this.getPage(fillingUrl);
+      console.log(`Fetching filing metadata from: ${filingUrl}`);
+      const $ = await this.getPage(filingUrl);
 
       const filingInfo = $("#filing_info");
       if (filingInfo.length === 0) {
@@ -459,7 +459,7 @@ class NyPucScraper {
       return metadata;
     } catch (error) {
       console.error(
-        `Error fetching filing metadata from ${fillingUrl}:`,
+        `Error fetching filing metadata from ${filingUrl}:`,
         error,
       );
       return null;
@@ -470,7 +470,7 @@ class NyPucScraper {
     filing: RawGenericFiling,
   ): Promise<void> {
     try {
-      const metadata = await this.fetchFilingMetadata(filing.filling_url);
+      const metadata = await this.fetchFilingMetadata(filing.filing_url);
       if (metadata) {
         // Merge the metadata into the filing object
         if (metadata.description) {
@@ -499,7 +499,7 @@ class NyPucScraper {
       }
     } catch (error) {
       console.error(
-        `Failed to fetch metadata for filing ${filing.filling_govid}:`,
+        `Failed to fetch metadata for filing ${filing.filing_govid}:`,
         error,
       );
     }
@@ -534,7 +534,7 @@ class NyPucScraper {
         if (!filingNo) return;
 
         const filingUrlRaw = $(docCells[5]).find("a").attr("href");
-        const fillingUrl = new URL(
+        const filingUrl = new URL(
           filingUrlRaw.replace("../", "https://documents.dps.ny.gov/public/"),
           url,
         ).toString();
@@ -558,7 +558,7 @@ class NyPucScraper {
           filingsMap.set(filingNo, {
             name: documentTitle,
             filed_date: new Date(dateFiled).toISOString(),
-            filling_url: fillingUrl,
+            filing_url: filingUrl,
             organization_authors: [],
             individual_authors: [],
             organization_authors_blob: authors,
@@ -567,7 +567,7 @@ class NyPucScraper {
             description: "",
             attachments: [],
             extra_metadata: { fileName },
-            filling_govid: filingNo,
+            filing_govid: filingNo,
           });
         }
 
@@ -722,7 +722,7 @@ class NyPucScraper {
           case ScrapingMode.METADATA:
             return await this.scrapeMetadataOnly(govId);
 
-          case ScrapingMode.FILLINGS: {
+          case ScrapingMode.filing: {
             const filings = await this.scrapeDocumentsOnly(govId);
             return { case_govid: govId, filings };
           }
@@ -947,8 +947,8 @@ async function pushResultsToUploader(
   mode: ScrapingMode,
 ) {
   let upload_type = "all";
-  if (mode == ScrapingMode.FILLINGS) {
-    upload_type = "only_fillings";
+  if (mode == ScrapingMode.filing) {
+    upload_type = "only_filing";
   }
   if (mode == ScrapingMode.PARTIES) {
     upload_type = "only_parties";

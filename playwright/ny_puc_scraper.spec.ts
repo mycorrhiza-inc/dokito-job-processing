@@ -13,7 +13,7 @@ import * as fs from "fs";
 
 enum ScrapingMode {
   METADATA = "meta",
-  FILLINGS = "fillings",
+  filing = "filing",
   PARTIES = "parties",
   ALL = "all",
 }
@@ -62,6 +62,16 @@ class NyPucScraper {
     const context = await this.browser.newContext();
     const page = await context.newPage();
     return { context, page };
+  }
+
+  async waitForLoadingSpinner(page: Page, timeout: number = 30000): Promise<void> {
+    await page.waitForFunction(
+      () => {
+        const loadingSpinner = document.querySelector('#GridPlaceHolder_UpdateProgress1');
+        return !loadingSpinner || window.getComputedStyle(loadingSpinner).display === 'none';
+      },
+      { timeout }
+    );
   }
 
   async processTasksWithQueue<T, R>(
@@ -152,17 +162,7 @@ class NyPucScraper {
         await page.waitForLoadState("networkidle", { timeout: 60000 });
 
         // Wait for the loading spinner to disappear
-        try {
-          await page.waitForFunction(
-            () => {
-              const loadingSpinner = document.querySelector('#GridPlaceHolder_UpdateProgress1');
-              return !loadingSpinner || window.getComputedStyle(loadingSpinner).display === 'none';
-            },
-            { timeout: 30000 }
-          );
-        } catch (error) {
-          console.log('Timeout waiting for loading spinner to disappear, continuing anyway...');
-        }
+        await this.waitForLoadingSpinner(page);
 
         console.log(`Getting page content at ${url}...`);
         const html = await page.content();
@@ -411,16 +411,17 @@ class NyPucScraper {
     return parties;
   }
 
-  async fetchFilingMetadata(fillingUrl: string): Promise<{
+  async fetchFilingMetadata(filingUrl: string): Promise<{
     description?: string;
     filedBy?: string;
     dateFiled?: string;
     filingNo?: string;
     filingOnBehalfOf?: string;
+    caseNumber?: string;
   } | null> {
     try {
-      console.log(`Fetching filing metadata from: ${fillingUrl}`);
-      const $ = await this.getPage(fillingUrl);
+      console.log(`Fetching filing metadata from: ${filingUrl}`);
+      const $ = await this.getPage(filingUrl);
 
       const filingInfo = $("#filing_info");
       if (filingInfo.length === 0) {
@@ -429,6 +430,12 @@ class NyPucScraper {
       }
 
       const metadata: any = {};
+
+      // Extract Case Number from Matter/Case Details section
+      const caseNumberElement = $("#lblCaseNoval");
+      if (caseNumberElement.length > 0) {
+        metadata.caseNumber = caseNumberElement.text().trim();
+      }
 
       // Extract Description of Filing
       const descriptionElement = filingInfo.find("#lblDescriptionofFilingval");
@@ -466,7 +473,7 @@ class NyPucScraper {
       return metadata;
     } catch (error) {
       console.error(
-        `Error fetching filing metadata from ${fillingUrl}:`,
+        `Error fetching filing metadata from ${filingUrl}:`,
         error,
       );
       return null;
@@ -477,7 +484,7 @@ class NyPucScraper {
     filing: RawGenericFiling,
   ): Promise<void> {
     try {
-      const metadata = await this.fetchFilingMetadata(filing.filling_url);
+      const metadata = await this.fetchFilingMetadata(filing.filing_url);
       if (metadata) {
         // Map description to the filing title/name
         if (metadata.description) {
@@ -500,8 +507,13 @@ class NyPucScraper {
           try {
             filing.filed_date = new Date(metadata.dateFiled).toISOString();
           } catch (dateError) {
-            console.warn(`Invalid date format for filing ${filing.filling_govid}: ${metadata.dateFiled}`);
+            console.warn(`Invalid date format for filing ${filing.filing_govid}: ${metadata.dateFiled}`);
           }
+        }
+
+        // Map caseNumber to filing_govid
+        if (metadata.caseNumber) {
+          filing.filing_govid = metadata.caseNumber;
         }
 
         // Keep organization filing on behalf of data
@@ -517,7 +529,7 @@ class NyPucScraper {
       }
     } catch (error) {
       console.error(
-        `Failed to fetch metadata for filing ${filing.filling_govid}:`,
+        `Failed to fetch metadata for filing ${filing.filing_govid}:`,
         error,
       );
     }
@@ -617,10 +629,10 @@ class NyPucScraper {
         if (!filingNo) return;
 
         const onclickAttr = $(docCells[5]).find("a").attr("onclick") || "";
-        const fillingUrl = this.extractFilingUrlFromOnclick(onclickAttr);
+        const filingUrl = this.extractFilingUrlFromOnclick(onclickAttr);
 
         // Skip this filing if we couldn't extract a valid URL
-        if (!fillingUrl) {
+        if (!filingUrl) {
           console.warn(`Skipping filing ${filingNo}: could not extract valid URL from onclick attribute`);
           return;
         }
@@ -645,7 +657,7 @@ class NyPucScraper {
           filingsMap.set(filingNo, {
             name: documentTitle,
             filed_date: new Date(dateFiled).toISOString(),
-            filling_url: fillingUrl,
+            filing_url: filingUrl,
             organization_authors: [],
             individual_authors: [],
             organization_authors_blob: authors,
@@ -654,7 +666,7 @@ class NyPucScraper {
             description: "",
             attachments: [],
             extra_metadata: { fileName },
-            filling_govid: filingNo,
+            filing_govid: filingNo,
           });
         }
 
@@ -819,7 +831,7 @@ class NyPucScraper {
           case ScrapingMode.METADATA:
             return await this.scrapeMetadataOnly(govId);
 
-          case ScrapingMode.FILLINGS: {
+          case ScrapingMode.filing: {
             const filings = await this.scrapeDocumentsOnly(govId);
             return { case_govid: govId, filings };
           }
@@ -1086,8 +1098,8 @@ async function pushResultsToUploader(
   mode: ScrapingMode,
 ) {
   let upload_type = "all";
-  if (mode == ScrapingMode.FILLINGS) {
-    upload_type = "only_fillings";
+  if (mode == ScrapingMode.filing) {
+    upload_type = "only_filing";
   }
   if (mode == ScrapingMode.PARTIES) {
     upload_type = "only_parties";
