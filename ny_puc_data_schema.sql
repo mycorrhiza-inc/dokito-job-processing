@@ -24,8 +24,8 @@ CREATE TABLE ny_puc_data.organizations (
     org_suffix text NOT NULL DEFAULT ''::text
 );
 
--- Humans table
-CREATE TABLE ny_puc_data.humans (
+-- Individuals table
+CREATE TABLE ny_puc_data.individuals (
     uuid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at timestamp with time zone NOT NULL DEFAULT now(),
     updated_at timestamp with time zone NOT NULL DEFAULT now(),
@@ -120,10 +120,10 @@ CREATE TABLE ny_puc_data.docket_petitioned_by_org (
 CREATE TABLE ny_puc_data.filings_filed_by_individual (
     uuid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at timestamp with time zone NOT NULL DEFAULT now(),
-    human_uuid uuid NOT NULL,
+    individual_uuid uuid NOT NULL,
     filing_uuid uuid NOT NULL,
-    CONSTRAINT filings_filed_by_individual_human_uuid_fkey FOREIGN KEY (human_uuid)
-        REFERENCES ny_puc_data.humans(uuid),
+    CONSTRAINT filings_filed_by_individual_individual_uuid_fkey FOREIGN KEY (individual_uuid)
+        REFERENCES ny_puc_data.individuals(uuid),
     CONSTRAINT filings_filed_by_individual_filing_uuid_fkey FOREIGN KEY (filing_uuid)
         REFERENCES ny_puc_data.filings(uuid)
 );
@@ -153,7 +153,7 @@ CREATE TABLE ny_puc_data.individual_offical_party_to_docket (
     CONSTRAINT individual_offical_party_to_docket_docket_uuid_fkey FOREIGN KEY (docket_uuid)
         REFERENCES ny_puc_data.dockets(uuid),
     CONSTRAINT individual_offical_party_to_docket_individual_uuid_fkey FOREIGN KEY (individual_uuid)
-        REFERENCES ny_puc_data.humans(uuid),
+        REFERENCES ny_puc_data.individuals(uuid),
     CONSTRAINT individual_offical_party_to_docket_representing_org_uuid_fkey FOREIGN KEY (representing_org_uuid)
         REFERENCES ny_puc_data.organizations(uuid),
     CONSTRAINT individual_offical_party_to_docket_employed_by_org_fkey FOREIGN KEY (employed_by_org)
@@ -180,7 +180,7 @@ COMMENT ON SCHEMA ny_puc_data IS 'New York Public Utilities Commission data stor
 COMMENT ON TABLE ny_puc_data.dockets IS 'Main docket records from NY PUC';
 COMMENT ON TABLE ny_puc_data.filings IS 'Documents filed in relation to dockets';
 COMMENT ON TABLE ny_puc_data.attachments IS 'File attachments associated with filings';
-COMMENT ON TABLE ny_puc_data.humans IS 'Individual persons involved in proceedings';
+COMMENT ON TABLE ny_puc_data.individuals IS 'Individual persons involved in proceedings';
 COMMENT ON TABLE ny_puc_data.organizations IS 'Organizations/entities involved in proceedings';
 COMMENT ON TABLE ny_puc_data.docket_petitioned_by_org IS 'Many-to-many relationship between dockets and petitioning organizations';
 COMMENT ON TABLE ny_puc_data.filings_filed_by_individual IS 'Many-to-many relationship between filings and individual authors';

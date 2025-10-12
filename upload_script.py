@@ -52,7 +52,7 @@ def get_or_create_human(cursor, name, first_name, last_name, contact_email='', c
 
     # Check if human exists by name
     cursor.execute(
-        "SELECT uuid FROM ny_puc_data.humans WHERE name = %s",
+        "SELECT uuid FROM ny_puc_data.individuals WHERE name = %s",
         (name,)
     )
     result = cursor.fetchone()
@@ -65,7 +65,7 @@ def get_or_create_human(cursor, name, first_name, last_name, contact_email='', c
     phones = [contact_phone] if contact_phone else []
 
     cursor.execute(
-        """INSERT INTO ny_puc_data.humans
+        """INSERT INTO ny_puc_data.individuals
            (name, western_first_name, western_last_name, contact_emails, contact_phone_numbers)
            VALUES (%s, %s, %s, %s, %s)
            RETURNING uuid""",
@@ -196,7 +196,12 @@ def insert_attachment(cursor, filing_uuid, docket_govid, filing_govid, attachmen
 
 def main():
     # Read JSON file
-    with open('/Users/orchid/mch/dockito/jobrunner/data_to_upload.json', 'r') as f:
+    if len(sys.argv) < 2:
+        print("Usage: python upload_script.py <json_file>")
+        sys.exit(1)
+
+    json_file = sys.argv[1]
+    with open(json_file, 'r') as f:
         cases = json.load(f)
 
     # Connect to database
@@ -293,13 +298,13 @@ def main():
                     # Check if relation already exists
                     cursor.execute(
                         """SELECT uuid FROM ny_puc_data.filings_filed_by_individual
-                           WHERE filing_uuid = %s AND human_uuid = %s""",
+                           WHERE filing_uuid = %s AND individual_uuid = %s""",
                         (filing_uuid, human_uuid)
                     )
                     if not cursor.fetchone():
                         cursor.execute(
                             """INSERT INTO ny_puc_data.filings_filed_by_individual
-                               (filing_uuid, human_uuid)
+                               (filing_uuid, individual_uuid)
                                VALUES (%s, %s)""",
                             (filing_uuid, human_uuid)
                         )
