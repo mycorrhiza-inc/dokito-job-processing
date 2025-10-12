@@ -304,12 +304,40 @@ class NyPucScraper {
     return filtered_cases;
   }
 
+  private async scrapeIndustryAffectedFromFillingsHtml(
+    html: string,
+  ): Promise<string> {
+    const $ = cheerio.load(html);
+    const industryElement = $("#GridPlaceHolder_MatterControl1_lblIndustryAffectedValue");
+
+    if (industryElement.length > 0) {
+      return industryElement.text().trim();
+    }
+
+    return "Unknown";
+  }
+
   async getCaseMeta(gov_id: string): Promise<Partial<RawGenericDocket>> {
     // get main page
     const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=&MT=&MST=&CN=&MNO=${gov_id}&CO=0&C=&M=&CO=0`;
     console.log(`getting cases metadata for date ${gov_id}`);
     const cases: Partial<RawGenericDocket>[] = await this.getCasesAt(url);
-    return cases[0];
+    const basicMetadata = cases[0];
+
+    // If we got basic metadata but industry is Unknown, try to get it from the case page
+    if (basicMetadata && (basicMetadata.industry === "Unknown" || !basicMetadata.industry)) {
+      try {
+        const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${gov_id}`;
+        const casePageHtml = await this.getPage(caseUrl);
+        const html = casePageHtml.html();
+        const industry = await this.scrapeIndustryAffectedFromFillingsHtml(html);
+        basicMetadata.industry = industry;
+      } catch (error) {
+        console.error(`Failed to extract industry from case page for ${gov_id}:`, error);
+      }
+    }
+
+    return basicMetadata;
   }
 
   private async scrapePartiesFromHtml(
