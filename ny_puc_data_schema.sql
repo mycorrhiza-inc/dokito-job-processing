@@ -75,8 +75,6 @@ CREATE TABLE ny_puc_data.filings (
     filing_description text NOT NULL DEFAULT ''::text,
     filing_govid text NOT NULL DEFAULT ''::text,
     filing_number text NOT NULL DEFAULT ''::text,
-    openscrapers_id text NOT NULL,
-    CONSTRAINT filings_openscrapers_id_key UNIQUE (openscrapers_id),
     CONSTRAINT filings_docket_uuid_fkey FOREIGN KEY (docket_uuid)
         REFERENCES ny_puc_data.dockets(uuid)
 );
@@ -98,8 +96,6 @@ CREATE TABLE ny_puc_data.attachments (
     attachment_type text NOT NULL DEFAULT ''::text,
     attachment_subtype text NOT NULL DEFAULT ''::text,
     attachment_url text NOT NULL DEFAULT ''::text,
-    openscrapers_id text NOT NULL,
-    CONSTRAINT attachments_openscrapers_id_key UNIQUE (openscrapers_id),
     CONSTRAINT attachments_parent_filing_uuid_fkey FOREIGN KEY (parent_filing_uuid)
         REFERENCES ny_puc_data.filings(uuid)
 );
