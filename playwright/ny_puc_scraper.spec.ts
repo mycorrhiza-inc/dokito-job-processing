@@ -67,7 +67,7 @@ class NyPucScraper {
     return { context, page };
   }
 
-  async waitForLoadingSpinner(page: Page, timeout: number = 30000): Promise<void> {
+  async waitForLoadingSpinner(page: Page, timeout: number = 0): Promise<void> {
     await page.waitForFunction(
       () => {
         const loadingSpinner = document.querySelector('#GridPlaceHolder_UpdateProgress1');
@@ -383,9 +383,9 @@ class NyPucScraper {
 
         await page.goto(url, {
           waitUntil: 'domcontentloaded',
-          timeout: 60000
+          timeout: 180000
         });
-        await page.waitForLoadState("networkidle", { timeout: 60000 });
+        await page.waitForLoadState("networkidle", { timeout: 180000 });
 
         // Wait for the loading spinner to disappear
         await this.waitForLoadingSpinner(page);
@@ -561,6 +561,40 @@ class NyPucScraper {
     }
 
     return "Unknown";
+  }
+
+  private async scrapeMetadataFromCasePageHtml(
+    html: string,
+    govId: string
+  ): Promise<Partial<RawGenericDocket>> {
+    const $ = cheerio.load(html);
+
+    const metadata: Partial<RawGenericDocket> = {
+      case_govid: govId,
+      case_url: `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${govId}`,
+    };
+
+    // Extract case name
+    const caseName = $("#GridPlaceHolder_MatterControl1_lblTitleofMatter").text().trim();
+    if (caseName) metadata.case_name = caseName;
+
+    // Extract matter type
+    const matterType = $("#GridPlaceHolder_MatterControl1_lblMatterTypeValue").text().trim();
+    if (matterType) metadata.case_type = matterType;
+
+    // Extract matter subtype
+    const matterSubtype = $("#GridPlaceHolder_MatterControl1_lblMatterSubtypeValue").text().trim();
+    if (matterSubtype) metadata.case_subtype = matterSubtype;
+
+    // Extract industry
+    const industry = $("#GridPlaceHolder_MatterControl1_lblIndustryAffectedValue").text().trim();
+    metadata.industry = industry || "Unknown";
+
+    // Extract case number
+    const caseNumber = $("#GridPlaceHolder_MatterControl1_lblMatterNumberValue").text().trim();
+    if (caseNumber) metadata.case_govid = caseNumber;
+
+    return metadata;
   }
 
   async getCaseMeta(gov_id: string): Promise<Partial<RawGenericDocket>> {
@@ -896,6 +930,49 @@ class NyPucScraper {
     return this.parsePersonName(name).fullName;
   }
 
+  private async extractFiledDocumentsCount(page: Page): Promise<number> {
+    try {
+      // Wait for the element to be visible before extracting text
+      // Large dockets can take up to 2 minutes to load the count
+      await page.waitForSelector('#GridPlaceHolder_lbtPubDoc', {
+        state: 'visible',
+        timeout: 120000
+      });
+
+      // The count is available in the page header before the table loads
+      // It's in an element with text like "Filed Documents (1234)"
+      const countText = await page.textContent('#GridPlaceHolder_lbtPubDoc');
+      console.log(`Raw element text for filed documents count: "${countText}"`);
+
+      if (countText) {
+        const match = countText.match(/Filed Documents \((\d+)\)/);
+        if (match) {
+          const count = parseInt(match[1], 10);
+          console.log(`Extracted filed documents count: ${count}`);
+          return count;
+        } else {
+          console.warn(`Text found but didn't match expected pattern: "${countText}"`);
+        }
+      } else {
+        console.warn('Element found but no text content');
+      }
+      return 0;
+    } catch (error) {
+      console.error('Failed to extract filed documents count:', error);
+      // Try to capture what's on the page for debugging
+      try {
+        const allText = await page.evaluate(() => {
+          const elem = document.querySelector('#GridPlaceHolder_lbtPubDoc');
+          return elem ? `Element found: ${elem.textContent}` : 'Element not found';
+        });
+        console.error('Debug info:', allText);
+      } catch (debugError) {
+        console.error('Could not get debug info');
+      }
+      return 0;
+    }
+  }
+
   private async scrapeDocumentsFromHtml(
     html: string,
     tableSelector: string,
@@ -986,9 +1063,86 @@ class NyPucScraper {
     return filings;
   }
 
+  private async scrapeDocumentsFromSearchPage(
+    govId: string,
+    caseMetadata: Partial<RawGenericDocket>
+  ): Promise<RawGenericFiling[]> {
+    console.log(`Scraping documents for ${govId} using monthly search (large docket >1000 documents)`);
+
+    // Get the case start date from metadata
+    let startDate: Date;
+    if (caseMetadata.opened_date) {
+      startDate = new Date(caseMetadata.opened_date);
+    } else {
+      // If no start date, default to 10 years ago
+      startDate = new Date();
+      startDate.setFullYear(startDate.getFullYear() - 10);
+    }
+
+    const endDate = new Date(); // Current date
+    const allFilings: RawGenericFiling[] = [];
+
+    // Iterate month by month
+    let currentStart = new Date(startDate);
+
+    while (currentStart <= endDate) {
+      // Calculate end of current month
+      const currentEnd = new Date(currentStart);
+      currentEnd.setMonth(currentEnd.getMonth() + 1);
+      currentEnd.setDate(0); // Last day of the month
+
+      // Don't go beyond the overall end date
+      if (currentEnd > endDate) {
+        currentEnd.setTime(endDate.getTime());
+      }
+
+      const startDateStr = this.formatDate(currentStart);
+      const endDateStr = this.formatDate(currentEnd);
+
+      console.log(`Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`);
+
+      const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=0&IA=&MT=&MST=&CN=&MNO=${govId}&CO=0&C=&M=&CO=0&DFF=${startDateStr}&DFT=${endDateStr}&DT=&CI=0&FC=`;
+
+      try {
+        const $ = await this.getPage(url, `filing-search-${startDateStr}-to-${endDateStr}`);
+        const html = $.html();
+        const htmlHash = this.calculateBlake2Hash(html);
+
+        // Check cache first
+        const cachedData = await this.findCachedParsedData(url, "filing-search", htmlHash);
+        let monthFilings: RawGenericFiling[];
+
+        if (cachedData) {
+          monthFilings = cachedData;
+        } else {
+          // Scrape from the search results table
+          const tableSelector = "#tblSearchedDocumentExternal > tbody";
+          monthFilings = await this.scrapeDocumentsFromHtml(html, tableSelector, url, govId);
+
+          // Save to cache
+          await this.saveParsedDataToCache(url, "filing-search", htmlHash, monthFilings);
+        }
+
+        console.log(`Found ${monthFilings.length} filings for month ${startDateStr}`);
+        allFilings.push(...monthFilings);
+      } catch (error) {
+        console.error(`Error fetching filings for ${govId} from ${startDateStr} to ${endDateStr}:`, error);
+      }
+
+      // Move to next month
+      currentStart.setMonth(currentStart.getMonth() + 1);
+      currentStart.setDate(1); // First day of next month
+    }
+
+    console.log(`Total filings scraped for ${govId}: ${allFilings.length}`);
+    return allFilings;
+  }
+
   async scrapeDocumentsOnly(
     govId: string,
-  ): Promise<RawGenericFiling[]> {
+    keepWindowOpen: boolean = false,
+    extractMetadata: boolean = false
+  ): Promise<RawGenericFiling[] | { documents: RawGenericFiling[]; page: Page; context: any; metadata?: Partial<RawGenericDocket> }> {
     let windowContext = null;
     try {
       console.log(`Scraping documents for case: ${govId} (new window)`);
@@ -996,8 +1150,11 @@ class NyPucScraper {
       const { context, page } = await this.newWindow();
       windowContext = context;
 
-      await page.goto(caseUrl);
-      await page.waitForLoadState("networkidle");
+      await page.goto(caseUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 180000
+      });
+      await page.waitForLoadState("networkidle", { timeout: 150000 });
 
       const docsTableSelector = "#tblPubDoc > tbody";
       try {
@@ -1009,9 +1166,23 @@ class NyPucScraper {
       // Calculate hash for cache check
       const htmlHash = this.calculateBlake2Hash(documentsHtml);
 
+      // Extract metadata from the case page if requested
+      let metadata: Partial<RawGenericDocket> | undefined;
+      if (extractMetadata) {
+        try {
+          metadata = await this.scrapeMetadataFromCasePageHtml(documentsHtml, govId);
+        } catch (error) {
+          console.error(`Error extracting metadata for ${govId}:`, error);
+          metadata = { case_govid: govId };
+        }
+      }
+
       // Check cache first
       const cachedData = await this.findCachedParsedData(caseUrl, "case-filings", htmlHash);
       if (cachedData) {
+        if (keepWindowOpen) {
+          return { documents: cachedData, page, context: windowContext, metadata };
+        }
         await windowContext.close();
         return cachedData;
       }
@@ -1029,30 +1200,50 @@ class NyPucScraper {
       // Save parsed data to cache
       await this.saveParsedDataToCache(caseUrl, "case-filings", htmlHash, documents);
 
-      await windowContext.close();
+      if (keepWindowOpen) {
+        return { documents, page, context: windowContext, metadata };
+      }
 
+      await windowContext.close();
       return documents;
     } catch (error) {
       console.error(`Error scraping documents for ${govId}:`, error);
       if (windowContext) {
         await windowContext.close();
       }
+      if (keepWindowOpen) {
+        return { documents: [], page: null as any, context: null };
+      }
       return [];
     }
   }
 
-  async scrapePartiesOnly(govId: string): Promise<RawGenericParty[]> {
+  async scrapePartiesOnly(
+    govId: string,
+    existingPage?: { page: Page; context: any }
+  ): Promise<RawGenericParty[]> {
     let windowContext = null;
-    try {
-      console.log(`Scraping parties for case: ${govId} (new window)`);
-      const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${govId}`;
-      const { context, page } = await this.newWindow();
-      windowContext = context;
+    let page: Page;
+    const shouldCloseWindow = !existingPage;
 
-      await page.goto(caseUrl);
-      // Removing this because it tries to wait until all the documents on the page are loaded, instead I am going to set a manual timer to wait 1 second and then try the navigation
-      await page.waitForLoadState("networkidle");
-      await page.waitForTimeout(10000);
+    try {
+      const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${govId}`;
+
+      if (existingPage) {
+        // Reuse existing page - already on the case page
+        page = existingPage.page;
+        windowContext = existingPage.context;
+      } else {
+        // Create new window and navigate
+        console.log(`Scraping parties for case: ${govId} (new window)`);
+        const newWindow = await this.newWindow();
+        windowContext = newWindow.context;
+        page = newWindow.page;
+
+        await page.goto(caseUrl);
+        await page.waitForLoadState("networkidle");
+        await page.waitForTimeout(10000);
+      }
 
       const partiesButtonSelector = "#GridPlaceHolder_lbtContact";
 
@@ -1060,7 +1251,9 @@ class NyPucScraper {
       const partiesButtonText = await page.textContent(partiesButtonSelector);
       if (partiesButtonText && partiesButtonText.includes("(0)")) {
         console.log(`No parties found for case ${govId} - returning early`);
-        await windowContext.close();
+        if (shouldCloseWindow && windowContext) {
+          await windowContext.close();
+        }
         return [];
       }
 
@@ -1090,7 +1283,9 @@ class NyPucScraper {
       // Check cache first
       const cachedData = await this.findCachedParsedData(caseUrl, "case-parties", htmlHash);
       if (cachedData) {
-        await windowContext.close();
+        if (shouldCloseWindow && windowContext) {
+          await windowContext.close();
+        }
         return cachedData;
       }
 
@@ -1102,11 +1297,13 @@ class NyPucScraper {
       // Save parsed data to cache
       await this.saveParsedDataToCache(caseUrl, "case-parties", htmlHash, parties);
 
-      await windowContext.close();
+      if (shouldCloseWindow && windowContext) {
+        await windowContext.close();
+      }
       return parties;
     } catch (error) {
       console.error(`Error scraping parties for ${govId}:`, error);
-      if (windowContext) {
+      if (shouldCloseWindow && windowContext) {
         await windowContext.close();
       }
       return [];
@@ -1158,7 +1355,8 @@ class NyPucScraper {
             return await this.scrapeMetadataOnly(govId);
 
           case ScrapingMode.filing: {
-            const filings = await this.scrapeDocumentsOnly(govId);
+            const result = await this.scrapeDocumentsOnly(govId);
+            const filings = Array.isArray(result) ? result : result.documents;
             return { case_govid: govId, filings };
           }
 
@@ -1168,21 +1366,43 @@ class NyPucScraper {
           }
 
           case ScrapingMode.ALL: {
-            const [metadata, documents, parties] = await Promise.all([
-              this.getCaseMeta(govId),
-              this.scrapeDocumentsOnly(govId),
-              this.scrapePartiesOnly(govId),
-            ]);
-            let return_case: Partial<RawGenericDocket> = { case_govid: govId };
-            if (metadata) {
-              return_case = metadata;
-              return_case.case_govid = govId;
+            // Scrape documents with keepWindowOpen=true and extractMetadata=true
+            // This opens ONE window and extracts both documents and metadata from the case page
+            const docsResult = await this.scrapeDocumentsOnly(govId, true, true);
+            let documents: RawGenericFiling[];
+            let parties: RawGenericParty[];
+            let metadata: Partial<RawGenericDocket> | undefined;
+
+            if (typeof docsResult === 'object' && 'documents' in docsResult) {
+              documents = docsResult.documents;
+              metadata = docsResult.metadata;
+
+              // Reuse the same window for parties if page exists
+              if (docsResult.page && docsResult.context) {
+                try {
+                  parties = await this.scrapePartiesOnly(govId, {
+                    page: docsResult.page,
+                    context: docsResult.context
+                  });
+                } finally {
+                  // Close the window after parties scraping
+                  await docsResult.context.close();
+                }
+              } else {
+                // Documents scraping failed, open new window for parties
+                parties = await this.scrapePartiesOnly(govId);
+              }
+            } else {
+              // Fallback: shouldn't happen but handle it
+              documents = docsResult as RawGenericFiling[];
+              parties = await this.scrapePartiesOnly(govId);
             }
 
+            let return_case: Partial<RawGenericDocket> = metadata || { case_govid: govId };
+            return_case.case_govid = govId;
             return_case.filings = documents;
             return_case.case_parties = parties;
 
-            // TODO: Make this an optional paramater that can be set with the CLI TOOL
             return return_case;
           }
         }
