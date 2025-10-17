@@ -1,0 +1,55 @@
+package main
+
+import (
+	"fmt"
+	"log"
+	"time"
+)
+
+func main() {
+	// Configuration - simplified test
+	govIDs := []string{"25-01799"}
+	scraperImage := "jobrunner-worker:latest"
+	workDir := "/tmp/jobrunner-test"
+	dokitoBaseURL := "http://localhost:8123"
+	
+	fmt.Println("🧪 Starting simplified runner test...")
+	
+	// Create runner with 1 worker
+	runner, err := NewRunner(1, scraperImage, workDir, dokitoBaseURL)
+	if err != nil {
+		log.Fatalf("Failed to create runner: %v", err)
+	}
+	defer runner.Stop()
+
+	fmt.Printf("🚀 Test runner started with 1 worker\n")
+	fmt.Printf("📁 Work directory: %s\n", workDir)
+	fmt.Printf("🐳 Scraper image: %s\n", scraperImage)
+	
+	// Submit just one simple scraping job
+	fmt.Println("\n=== Test: Single Metadata Scraping Job ===")
+	jobID := runner.SubmitScrapeJob(govIDs, ScrapingModeMetadata, false, 0)
+	fmt.Printf("Submitted test scrape job: %s\n", jobID)
+	
+	// Wait longer for job to complete
+	fmt.Println("\n⏳ Waiting for job to complete...")
+	time.Sleep(30 * time.Second)
+	
+	// Print detailed results
+	fmt.Println("\n=== Test Results ===")
+	results := runner.GetResults()
+	for key, result := range results {
+		fmt.Printf("Result key: %s\n", key)
+		fmt.Printf("Result: %+v\n", result)
+		fmt.Println("---")
+	}
+	
+	summary := runner.GetJobSummary(jobID)
+	fmt.Printf("\nJob Summary: %+v\n", summary)
+	
+	if len(summary.Errors) > 0 {
+		fmt.Printf("❌ Errors: %v\n", summary.Errors)
+	}
+	
+	fmt.Println("\n🧪 Test completed!")
+}
