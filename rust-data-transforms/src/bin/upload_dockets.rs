@@ -2,7 +2,7 @@ use clap::Parser;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::nypuc_ingest::ingest_sql_fixed_jurisdiction_case;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
-use rust_data_transforms::types::processed::ProcessedGenericDocket;
+use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use serde_json;
 use std::io::{self, Read, Write};
 use anyhow::Result;
@@ -28,22 +28,19 @@ async fn main() -> Result<()> {
 
     let pool = get_dokito_pool().await?;
 
-    if input.trim_start().starts_with('[') {
-        let mut processed_dockets: Vec<ProcessedGenericDocket> = serde_json::from_str(&input)?;
+    let cli_processed_dockets: CliProcessedDockets = serde_json::from_str(&input)?;
+    let mut processed_dockets: Vec<_> = cli_processed_dockets.into();
 
-        for processed_docket in processed_dockets.iter_mut() {
-            ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, &pool, false).await?;
-        }
+    for processed_docket in processed_dockets.iter_mut() {
+        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, &pool, false).await?;
+    }
 
-        let result = serde_json::to_string(&processed_dockets)?;
-        io::stdout().write_all(result.as_bytes())?;
+    let result = if processed_dockets.len() == 1 {
+        serde_json::to_string(&processed_dockets[0])?
     } else {
-        let mut processed_docket: ProcessedGenericDocket = serde_json::from_str(&input)?;
-        ingest_sql_fixed_jurisdiction_case(&mut processed_docket, cli.fixed_jur, &pool, false).await?;
-
-        let result = serde_json::to_string(&processed_docket)?;
-        io::stdout().write_all(result.as_bytes())?;
+        serde_json::to_string(&processed_dockets)?
     };
+    io::stdout().write_all(result.as_bytes())?;
 
     io::stdout().flush()?;
 

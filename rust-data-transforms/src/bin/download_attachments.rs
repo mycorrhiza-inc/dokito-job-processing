@@ -2,7 +2,7 @@ use clap::Parser;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::processing::attachments::OpenscrapersExtraData;
 use rust_data_transforms::data_processing_traits::DownloadIncomplete;
-use rust_data_transforms::types::processed::ProcessedGenericDocket;
+use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
 use serde_json;
 use std::io::{self, Read, Write};
@@ -35,24 +35,10 @@ async fn main() -> Result<()> {
         fixed_jurisdiction: cli.fixed_jur,
     };
 
-    if input.trim_start().starts_with('[') {
-        let mut processed_dockets: Vec<ProcessedGenericDocket> = serde_json::from_str(&input)?;
+    let cli_processed_dockets: CliProcessedDockets = serde_json::from_str(&input)?;
+    let mut processed_dockets: Vec<_> = cli_processed_dockets.into();
 
-        for processed_docket in processed_dockets.iter_mut() {
-            for filing in processed_docket.filings.iter_mut() {
-                for attachment in filing.attachments.iter_mut() {
-                    if attachment.hash.is_none() {
-                        let _ = attachment.download_incomplete(extra_data.clone()).await?;
-                    }
-                }
-            }
-        }
-
-        let result = serde_json::to_string(&processed_dockets)?;
-        io::stdout().write_all(result.as_bytes())?;
-    } else {
-        let mut processed_docket: ProcessedGenericDocket = serde_json::from_str(&input)?;
-
+    for processed_docket in processed_dockets.iter_mut() {
         for filing in processed_docket.filings.iter_mut() {
             for attachment in filing.attachments.iter_mut() {
                 if attachment.hash.is_none() {
@@ -60,10 +46,14 @@ async fn main() -> Result<()> {
                 }
             }
         }
+    }
 
-        let result = serde_json::to_string(&processed_docket)?;
-        io::stdout().write_all(result.as_bytes())?;
+    let result = if processed_dockets.len() == 1 {
+        serde_json::to_string(&processed_dockets[0])?
+    } else {
+        serde_json::to_string(&processed_dockets)?
     };
+    io::stdout().write_all(result.as_bytes())?;
 
     io::stdout().flush()?;
 
