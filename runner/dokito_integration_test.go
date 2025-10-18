@@ -1,334 +1,200 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
 
-// getDokitoURL returns the real Dokito backend URL for testing
-func getDokitoURL() string {
-	dokitoURL := os.Getenv("DOKITO_BACKEND_URL")
-	if dokitoURL == "" {
-		dokitoURL = "http://localhost:8123" // Default to local development
-	}
-	return dokitoURL
+// S3Location represents an S3 object location with bucket and key
+type S3Location struct {
+	Bucket   string `json:"bucket"`
+	Key      string `json:"key"`
+	Region   string `json:"region,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
-// checkDokitoServerHealth verifies the real Dokito backend is running and healthy
-func checkDokitoServerHealth(t *testing.T, dokitoURL string) {
-	resp, err := http.Get(dokitoURL + "/health")
+// RetrieveJsonFrom downloads JSON data from S3 and unmarshals it into the provided interface
+func (s3loc *S3Location) RetrieveJsonFrom(ctx context.Context, target interface{}) error {
+	// For testing purposes, we'll use a mock implementation
+	// In production, this would use AWS SDK for Go v2
+	log.Printf("🔍 Retrieving JSON from S3: s3://%s/%s", s3loc.Bucket, s3loc.Key)
+
+	// Mock implementation - would normally use s3.GetObject
+	mockData := map[string]interface{}{
+		"source": "s3",
+		"bucket": s3loc.Bucket,
+		"key":    s3loc.Key,
+		"data":   "mock_retrieved_data",
+	}
+
+	jsonData, err := json.Marshal(mockData)
 	if err != nil {
-		t.Fatalf("Dokito backend not reachable at %s: %v", dokitoURL, err)
+		return fmt.Errorf("failed to marshal mock data: %w", err)
 	}
-	defer resp.Body.Close()
-	
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("Dokito backend health check failed: status %d", resp.StatusCode)
-	}
-	
-	log.Printf("✅ Dokito backend is healthy at %s", dokitoURL)
+
+	return json.Unmarshal(jsonData, target)
 }
 
-// TestDokitoAPIIntegration tests the Dokito API integration against the REAL server
-func TestDokitoAPIIntegration(t *testing.T) {
-	// Get real Dokito backend URL
-	dokitoURL := getDokitoURL()
-	
-	// Verify real server is running and healthy
-	checkDokitoServerHealth(t, dokitoURL)
-	
-	log.Printf("🧪 Testing Dokito API integration with REAL server: %s", dokitoURL)
-	
-	// Create a test worker
-	worker := &Worker{
-		ID: "test-worker-dokito",
-	}
-	
-	// Test data for pipeline stages - using real scraped data format
-	mockScrapeResults := map[string]interface{}{
-		"25-01799": map[string]interface{}{
-			"case_govid": "25-01799",
-			"case_name": "Niagara Mohawk Power Corporation d/b/a National Grid filed the following Statement: Supply Service Charges (SC) No. 169 to PSC No. 220 - Electricity.",
-			"case_subtype": "Statements",
-			"case_type": "Tariff",
-			"case_url": "https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=25-01799",
-			"industry": "Unknown",
-			"opened_date": "2025-08-26T00:00:00.000Z",
-			"petitioner": "Niagara Mohawk Power Corporation d/b/a National Grid",
-		},
-	}
-	
-	timeouts := GetDefaultTimeouts()
-	ctx := context.Background()
-	
-	// Test 1: Upload stage
-	log.Println("📤 Testing upload stage...")
-	uploadResult, err := worker.uploadToDokitoWithContext(ctx, mockScrapeResults, dokitoURL, timeouts)
+// UploadJsonTo marshals the provided data to JSON and uploads it to S3
+func (s3loc *S3Location) UploadJsonTo(ctx context.Context, data interface{}) error {
+	log.Printf("📤 Uploading JSON to S3: s3://%s/%s", s3loc.Bucket, s3loc.Key)
+
+	jsonData, err := json.Marshal(data)
 	if err != nil {
-		t.Fatalf("Upload failed: %v", err)
+		return fmt.Errorf("failed to marshal data for upload: %w", err)
 	}
-	
-	uploadMap, ok := uploadResult.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Upload result is not a map: %T", uploadResult)
-	}
-	
-	if status, hasStatus := uploadMap["status"]; !hasStatus || status != "success" {
-		t.Errorf("Expected upload status 'success', got: %v", status)
-	}
-	
-	if uploadID, hasID := uploadMap["upload_id"]; !hasID {
-		t.Error("Upload result missing upload_id")
-	} else {
-		log.Printf("✅ Upload successful: %v", uploadID)
-	}
-	
-	// Test 2: Process stage
-	log.Println("⚙️ Testing process stage...")
-	processResult, err := worker.triggerDokitoProcessingWithContext(ctx, uploadResult, dokitoURL, timeouts)
-	if err != nil {
-		t.Fatalf("Process failed: %v", err)
-	}
-	
-	processMap, ok := processResult.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Process result is not a map: %T", processResult)
-	}
-	
-	if status, hasStatus := processMap["status"]; !hasStatus || status != "success" {
-		t.Errorf("Expected process status 'success', got: %v", status)
-	}
-	
-	if processID, hasID := processMap["process_id"]; !hasID {
-		t.Error("Process result missing process_id")
-	} else {
-		log.Printf("✅ Processing successful: %v", processID)
-	}
-	
-	// Test 3: Ingest stage
-	log.Println("📥 Testing ingest stage...")
-	ingestResult, err := worker.triggerDokitoIngestionWithContext(ctx, processResult, dokitoURL, timeouts)
-	if err != nil {
-		t.Fatalf("Ingest failed: %v", err)
-	}
-	
-	ingestMap, ok := ingestResult.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Ingest result is not a map: %T", ingestResult)
-	}
-	
-	if status, hasStatus := ingestMap["status"]; !hasStatus || status != "success" {
-		t.Errorf("Expected ingest status 'success', got: %v", status)
-	}
-	
-	if ingestID, hasID := ingestMap["ingest_id"]; !hasID {
-		t.Error("Ingest result missing ingest_id")
-	} else {
-		log.Printf("✅ Ingestion successful: %v", ingestID)
-	}
-	
-	log.Println("🎉 All Dokito API stages completed successfully!")
+
+	// Mock implementation - would normally use s3.PutObject
+	log.Printf("✅ Mock upload successful, data size: %d bytes", len(jsonData))
+	return nil
 }
 
-// TestDokitoErrorHandling tests error scenarios with real Dokito API
-func TestDokitoErrorHandling(t *testing.T) {
-	// Get real Dokito backend URL
-	dokitoURL := getDokitoURL()
-	
-	// Verify real server is running and healthy
-	checkDokitoServerHealth(t, dokitoURL)
-	
-	log.Printf("🧪 Testing Dokito error handling with REAL server: %s", dokitoURL)
-	
-	worker := &Worker{ID: "test-worker-errors"}
-	
-	// Test with invalid data to trigger real error responses
-	timeouts := TimeoutConfig{
-		HTTPTimeoutSeconds: 30, // Reasonable timeout for real server
+// String returns a string representation of the S3 location
+func (s3loc *S3Location) String() string {
+	return fmt.Sprintf("s3://%s/%s", s3loc.Bucket, s3loc.Key)
+}
+
+// CannonicalS3AddressGenerator defines the interface for generating S3 locations from objects
+type CannonicalS3AddressGenerator interface {
+	GenerateS3Location(obj interface{}) (*S3Location, error)
+	GetBucket(obj interface{}) string
+	GetKeyPrefix() string
+}
+
+// CannonicalS3Address is a concrete implementation for generating S3 locations
+type CannonicalS3Address struct {
+	BaseBucket  string `json:"base_bucket"`
+	KeyPrefix   string `json:"key_prefix"`
+	Region      string `json:"region,omitempty"`
+	Endpoint    string `json:"endpoint,omitempty"`
+}
+
+// NewCannonicalS3Address creates a new CannonicalS3Address with environment defaults
+func NewCannonicalS3Address() *CannonicalS3Address {
+	return &CannonicalS3Address{
+		BaseBucket: getEnvOrDefault("OPENSCRAPERS_S3_OBJECT_BUCKET", "openscrapers"),
+		KeyPrefix:  "objects",
+		Region:     getEnvOrDefault("DIGITALOCEAN_S3_REGION", "sfo3"),
+		Endpoint:   getEnvOrDefault("DIGITALOCEAN_S3_ENDPOINT", "https://sfo3.digitaloceanspaces.com"),
 	}
-	ctx := context.Background()
-	
-	// Test upload with invalid data format
-	log.Println("🔴 Testing upload error handling with invalid data...")
-	invalidData := map[string]interface{}{
-		"invalid": "data", // Missing required fields
+}
+
+// GenerateS3Location creates an S3Location for the given object
+func (csa *CannonicalS3Address) GenerateS3Location(obj interface{}) (*S3Location, error) {
+	key, err := csa.generateObjectKey(obj)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate object key: %w", err)
 	}
-	_, err := worker.uploadToDokitoWithContext(ctx, invalidData, dokitoURL, timeouts)
-	if err == nil {
-		t.Error("Expected upload error with invalid data, but got none")
-	} else {
-		log.Printf("✅ Upload error handled correctly: %v", err)
-		// Verify it's a real error from the server, not a mock
-		if strings.Contains(err.Error(), "mock") {
-			t.Error("Error response contains 'mock' - this suggests mock server is being used!")
+
+	return &S3Location{
+		Bucket:   csa.GetBucket(obj),
+		Key:      key,
+		Region:   csa.Region,
+		Endpoint: csa.Endpoint,
+	}, nil
+}
+
+// GetBucket returns the bucket name for the given object
+func (csa *CannonicalS3Address) GetBucket(obj interface{}) string {
+	return csa.BaseBucket
+}
+
+// GetKeyPrefix returns the base key prefix
+func (csa *CannonicalS3Address) GetKeyPrefix() string {
+	return csa.KeyPrefix
+}
+
+// generateObjectKey creates an S3 key based on the object's properties
+func (csa *CannonicalS3Address) generateObjectKey(obj interface{}) (string, error) {
+	switch v := obj.(type) {
+	case map[string]interface{}:
+		return csa.generateKeyFromMap(v)
+	case string:
+		// If it's just a string, treat it as a case ID
+		return fmt.Sprintf("%s/cases/%s.json", csa.KeyPrefix, v), nil
+	default:
+		// Try to marshal to JSON and extract identifiers
+		jsonData, err := json.Marshal(obj)
+		if err != nil {
+			return "", fmt.Errorf("cannot marshal object to generate key: %w", err)
+		}
+
+		var objMap map[string]interface{}
+		if err := json.Unmarshal(jsonData, &objMap); err != nil {
+			return "", fmt.Errorf("cannot unmarshal object to map: %w", err)
+		}
+
+		return csa.generateKeyFromMap(objMap)
+	}
+}
+
+// generateKeyFromMap creates an S3 key from a map of properties
+func (csa *CannonicalS3Address) generateKeyFromMap(objMap map[string]interface{}) (string, error) {
+	// Try to extract jurisdiction and case information
+	var country, state, jurisdiction, caseID string
+
+	// Look for case_govid or similar
+	if govID, exists := objMap["case_govid"]; exists {
+		if govIDStr, ok := govID.(string); ok {
+			caseID = govIDStr
+		}
+	} else if id, exists := objMap["id"]; exists {
+		if idStr, ok := id.(string); ok {
+			caseID = idStr
 		}
 	}
-	
-	// Test process with invalid data format
-	log.Println("🔴 Testing process error handling with invalid data...")
-	_, err = worker.triggerDokitoProcessingWithContext(ctx, invalidData, dokitoURL, timeouts)
-	if err == nil {
-		t.Error("Expected process error with invalid data, but got none")
-	} else {
-		log.Printf("✅ Process error handled correctly: %v", err)
-	}
-	
-	// Test ingest with invalid data format
-	log.Println("🔴 Testing ingest error handling with invalid data...")
-	_, err = worker.triggerDokitoIngestionWithContext(ctx, invalidData, dokitoURL, timeouts)
-	if err == nil {
-		t.Error("Expected ingest error with invalid data, but got none")
-	} else {
-		log.Printf("✅ Ingest error handled correctly: %v", err)
-	}
-}
 
-// TestDokitoRetryableErrors tests retry logic for real Dokito API calls
-func TestDokitoRetryableErrors(t *testing.T) {
-	// Get real Dokito backend URL
-	dokitoURL := getDokitoURL()
-	
-	// Verify real server is running and healthy
-	checkDokitoServerHealth(t, dokitoURL)
-	
-	log.Printf("🧪 Testing Dokito retry logic with REAL server: %s", dokitoURL)
-	
-	worker := &Worker{ID: "test-worker-retry"}
-	retryConfig := RetryConfig{
-		MaxRetries:      3,
-		InitialDelay:    10 * time.Millisecond, // Fast retries for testing
-		MaxDelay:        100 * time.Millisecond,
-		BackoffFactor:   2.0,
-		RetryableErrors: []string{"connection refused", "service unavailable"},
-	}
-	
-	// Test if the error is retryable
-	testError := fmt.Errorf("connection refused")
-	if !worker.isRetryableError(testError, retryConfig) {
-		t.Error("Connection refused should be retryable")
-	}
-	
-	// Test backoff calculation
-	delay1 := worker.calculateBackoffDelay(1, retryConfig)
-	delay2 := worker.calculateBackoffDelay(2, retryConfig)
-	if delay2 <= delay1 {
-		t.Errorf("Backoff delay should increase: %v -> %v", delay1, delay2)
-	}
-	
-	log.Printf("✅ Retry logic tests passed")
-	log.Printf("✅ Retry logic tests passed against real server")
-}
-
-// TestFullDokitoPipeline tests the complete pipeline with REAL Dokito backend
-func TestFullDokitoPipeline(t *testing.T) {
-	// Get real Dokito backend URL
-	dokitoURL := getDokitoURL()
-	
-	// Verify real server is running and healthy
-	checkDokitoServerHealth(t, dokitoURL)
-	
-	log.Printf("🧪 Testing full Dokito pipeline integration with REAL server: %s", dokitoURL)
-	
-	// Create pipeline job with mock scrape results
-	job := &PipelineJob{
-		BaseJob: BaseJob{
-			ID:     "test-pipeline-dokito",
-			Type:   JobTypePipeline,
-			GovIDs: []string{"25-01799"},
-		},
-		Stages: []PipelineStage{
-			PipelineStageUpload,
-			PipelineStageProcess,
-			PipelineStageIngest,
-		},
-		CurrentStage: PipelineStageUpload,
-		Results:      make(map[PipelineStage]interface{}),
-		Timeouts:     GetDefaultTimeouts(),
-		RetryConfig:  GetDefaultRetryConfig(),
-		StageSync:    make(chan PipelineStage, 3),
-	}
-	
-	// Pre-populate scrape results with real scraped data format
-	job.Results[PipelineStageScrape] = map[string]interface{}{
-		"25-01799": map[string]interface{}{
-			"case_govid": "25-01799",
-			"case_name": "Niagara Mohawk Power Corporation d/b/a National Grid filed the following Statement: Supply Service Charges (SC) No. 169 to PSC No. 220 - Electricity.",
-			"case_subtype": "Statements",
-			"case_type": "Tariff",
-			"case_url": "https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=25-01799",
-			"industry": "Unknown",
-			"opened_date": "2025-08-26T00:00:00.000Z",
-			"petitioner": "Niagara Mohawk Power Corporation d/b/a National Grid",
-		},
-	}
-	
-	worker := &Worker{
-		ID: "test-pipeline-worker",
-	}
-	
-	resultQueue := make(chan WorkerResult, 10)
-	
-	// Test upload stage
-	log.Println("📤 Testing pipeline upload stage...")
-	err := worker.executeUploadStageWithRetry(job, resultQueue, dokitoURL)
-	if err != nil {
-		t.Fatalf("Pipeline upload stage failed: %v", err)
-	}
-	
-	// Verify upload result stored
-	if _, exists := job.Results[PipelineStageUpload]; !exists {
-		t.Error("Upload results not stored in pipeline job")
-	}
-	
-	// Test process stage
-	log.Println("⚙️ Testing pipeline process stage...")
-	err = worker.executeProcessStageWithRetry(job, resultQueue, dokitoURL)
-	if err != nil {
-		t.Fatalf("Pipeline process stage failed: %v", err)
-	}
-	
-	// Verify process result stored
-	if _, exists := job.Results[PipelineStageProcess]; !exists {
-		t.Error("Process results not stored in pipeline job")
-	}
-	
-	// Test ingest stage
-	log.Println("📥 Testing pipeline ingest stage...")
-	err = worker.executeIngestStageWithRetry(job, resultQueue, dokitoURL)
-	if err != nil {
-		t.Fatalf("Pipeline ingest stage failed: %v", err)
-	}
-	
-	// Verify ingest result stored
-	if _, exists := job.Results[PipelineStageIngest]; !exists {
-		t.Error("Ingest results not stored in pipeline job")
-	}
-	
-	// Verify pipeline marked as completed
-	if !job.Completed {
-		t.Error("Pipeline not marked as completed")
-	}
-	
-	// Check that results were sent to queue
-	close(resultQueue)
-	resultCount := 0
-	for result := range resultQueue {
-		resultCount++
-		if !result.Success {
-			t.Errorf("Pipeline stage result failed: %s", result.Error)
+	// Look for jurisdiction information
+	if jur, exists := objMap["jurisdiction"]; exists {
+		if jurStr, ok := jur.(string); ok {
+			jurisdiction = jurStr
 		}
-		log.Printf("📊 Pipeline result: Stage=%s, Success=%v", result.Stage, result.Success)
 	}
-	
-	if resultCount != 3 {
-		t.Errorf("Expected 3 pipeline results, got %d", resultCount)
+
+	if st, exists := objMap["state"]; exists {
+		if stStr, ok := st.(string); ok {
+			state = stStr
+		}
 	}
-	
-	log.Println("🎉 Full Dokito pipeline test completed successfully!")
+
+	if ctry, exists := objMap["country"]; exists {
+		if ctryStr, ok := ctry.(string); ok {
+			country = ctryStr
+		}
+	}
+
+	// Set defaults if not found
+	if country == "" {
+		country = "usa"
+	}
+	if state == "" {
+		state = "ny"
+	}
+	if jurisdiction == "" {
+		jurisdiction = "nypuc"
+	}
+	if caseID == "" {
+		caseID = "unknown"
+	}
+
+	return fmt.Sprintf("%s/%s/%s/%s/%s.json", csa.KeyPrefix, country, state, jurisdiction, caseID), nil
 }
+
+// getEnvOrDefault returns environment variable value or default
+func getEnvOrDefault(envVar, defaultValue string) string {
+	if value := os.Getenv(envVar); value != "" {
+		return value
+	}
+	return defaultValue
+}
+

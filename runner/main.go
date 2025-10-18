@@ -4310,6 +4310,21 @@ func main() {
 	if dokitoBaseURL == "" {
 		dokitoBaseURL = "http://localhost:8123"
 	}
+
+	// Get binary paths from environment variables - required
+	processDocketsBinaryPath := os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH")
+	uploadDocketsBinaryPath := os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH")
+	downloadAttachmentsBinaryPath := os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH")
+
+	if processDocketsBinaryPath == "" {
+		log.Fatal("❌ DOKITO_PROCESS_DOCKETS_BINARY_PATH environment variable is required")
+	}
+	if uploadDocketsBinaryPath == "" {
+		log.Fatal("❌ DOKITO_UPLOAD_DOCKETS_BINARY_PATH environment variable is required")
+	}
+	if downloadAttachmentsBinaryPath == "" {
+		log.Fatal("❌ DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH environment variable is required")
+	}
 	
 	// Create runner
 	runner, err := NewRunner(workerCount, scraperImage, workDir, dokitoBaseURL)
