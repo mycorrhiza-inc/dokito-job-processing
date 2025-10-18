@@ -7,7 +7,6 @@ pub mod jurisdiction_schema_mapping;
 pub mod openscraper_data_traits;
 pub mod processing;
 pub mod s3_stuff;
-pub mod server;
 pub mod sql_ingester_tasks;
 pub mod indexes;
 
