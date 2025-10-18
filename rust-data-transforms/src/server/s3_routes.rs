@@ -277,7 +277,7 @@ pub async fn handle_attachment_data_from_s3(
             return (axum::http::StatusCode::BAD_REQUEST, e.to_string()).into_response();
         }
     };
-    let result = download_openscrapers_object::<RawAttachment>(&s3_client, &hash).await;
+    let result: Result<RawAttachment, _> = download_openscrapers_object::<RawAttachment>(&s3_client, &hash).await;
     match result {
         Ok(attachment) => {
             info!(hash = %blake2b_hash, "Successfully fetched attachment data");

@@ -7,6 +7,18 @@ edition = "2024"
 name = "rust-data-transforms"
 path = "src/main.rs"
 
+[[bin]]
+name = "process-dockets"
+path = "src/bin/process_dockets.rs"
+
+[[bin]]
+name = "upload-dockets"
+path = "src/bin/upload_dockets.rs"
+
+[[bin]]
+name = "download-attachments"
+path = "src/bin/download_attachments.rs"
+
 [lib]
 name = "rust_data_transforms"
 path = "src/lib.rs"
@@ -38,6 +50,7 @@ rand = "0.9.1"
 thiserror = "2.0.12"
 hyper = "1.6.0"
 futures-util = "0.3.31"
+clap = { version = "4.0", features = ["derive"] }
 
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }

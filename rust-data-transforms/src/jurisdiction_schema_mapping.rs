@@ -1,14 +1,19 @@
 use crate::types::jurisdictions::JurisdictionInfo;
+use clap::ValueEnum;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema)]
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum FixedJurisdiction {
+    #[value(name = "new_york_puc")]
     NewYorkPuc,
+    #[value(name = "colorado_puc")]
     ColoradoPuc,
+    #[value(name = "california_puc")]
     CaliforniaPuc,
+    #[value(name = "utah_dogm_coal")]
     UtahDogmCoal,
 }
 impl FixedJurisdiction {
@@ -79,3 +84,4 @@ impl From<FixedJurisdiction> for JurisdictionInfo {
         }
     }
 }
+
