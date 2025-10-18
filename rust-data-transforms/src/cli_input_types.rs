@@ -1,5 +1,5 @@
+use crate::types::processed::ProcessedGenericDocket;
 use openscraper_types::raw::RawGenericDocket;
-use openscraper_types::processed::ProcessedGenericDocket;
 use serde::Deserialize;
 
 #[derive(Clone, Deserialize, Debug)]
@@ -17,6 +17,16 @@ impl From<CliRawDockets> for Vec<RawGenericDocket> {
         }
     }
 }
+impl From<Vec<RawGenericDocket>> for CliRawDockets {
+    fn from(mut value: Vec<RawGenericDocket>) -> Self {
+        if value.len() == 1
+            && let Some(single) = value.pop()
+        {
+            return Self::Singular(single);
+        }
+        Self::Multiple(value)
+    }
+}
 
 #[derive(Clone, Deserialize, Debug)]
 #[serde(untagged)]
@@ -31,5 +41,16 @@ impl From<CliProcessedDockets> for Vec<ProcessedGenericDocket> {
             CliProcessedDockets::Multiple(list) => list,
             CliProcessedDockets::Singular(single) => vec![single],
         }
+    }
+}
+
+impl From<Vec<ProcessedGenericDocket>> for CliProcessedDockets {
+    fn from(mut value: Vec<ProcessedGenericDocket>) -> Self {
+        if value.len() == 1
+            && let Some(single) = value.pop()
+        {
+            return Self::Singular(single);
+        }
+        Self::Multiple(value)
     }
 }
