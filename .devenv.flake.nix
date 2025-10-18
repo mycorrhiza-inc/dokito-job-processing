@@ -3,11 +3,11 @@
     let
       version = "1.9.1";
 system = "x86_64-linux";
-devenv_root = "/home/nicole/Documents/mycorrhiza/dokito-job-processing/rust-data-transforms";
-devenv_dotfile = "/home/nicole/Documents/mycorrhiza/dokito-job-processing/rust-data-transforms/.devenv";
+devenv_root = "/home/nicole/Documents/mycorrhiza/dokito-job-processing";
+devenv_dotfile = "/home/nicole/Documents/mycorrhiza/dokito-job-processing/.devenv";
 devenv_dotfile_path = ./.devenv;
 devenv_tmpdir = "/run/user/1000";
-devenv_runtime = "/run/user/1000/devenv-2218112";
+devenv_runtime = "/run/user/1000/devenv-30a28ea";
 devenv_istesting = false;
 devenv_direnvrc_latest_version = 1;
 container_name = null;
@@ -30,11 +30,11 @@ git_root = "/home/nicole/Documents/mycorrhiza/dokito-job-processing";
         let
           version = "1.9.1";
 system = "x86_64-linux";
-devenv_root = "/home/nicole/Documents/mycorrhiza/dokito-job-processing/rust-data-transforms";
-devenv_dotfile = "/home/nicole/Documents/mycorrhiza/dokito-job-processing/rust-data-transforms/.devenv";
+devenv_root = "/home/nicole/Documents/mycorrhiza/dokito-job-processing";
+devenv_dotfile = "/home/nicole/Documents/mycorrhiza/dokito-job-processing/.devenv";
 devenv_dotfile_path = ./.devenv;
 devenv_tmpdir = "/run/user/1000";
-devenv_runtime = "/run/user/1000/devenv-2218112";
+devenv_runtime = "/run/user/1000/devenv-30a28ea";
 devenv_istesting = false;
 devenv_direnvrc_latest_version = 1;
 container_name = null;
