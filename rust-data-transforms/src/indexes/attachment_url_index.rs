@@ -4,7 +4,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use dokito_types::{attachments::RawAttachment, env_vars::DIGITALOCEAN_S3};
+use crate::types::{attachments::RawAttachment, env_vars::DIGITALOCEAN_S3};
 use mycorrhiza_common::{
     s3_generic::cannonical_location::upload_object,
     tasks::{ExecuteUserTask, display_error_as_json},

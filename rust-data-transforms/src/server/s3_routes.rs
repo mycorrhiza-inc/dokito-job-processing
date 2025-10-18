@@ -5,7 +5,7 @@ use axum::{
     http::HeaderValue,
     response::{IntoResponse, Json},
 };
-use dokito_types::{env_vars::DIGITALOCEAN_S3, raw::RawGenericDocket};
+use crate::types::{env_vars::DIGITALOCEAN_S3, raw::RawGenericDocket};
 use futures::join;
 use hyper::{StatusCode, body::Bytes, header};
 use mycorrhiza_common::{

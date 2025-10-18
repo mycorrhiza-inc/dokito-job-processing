@@ -8,7 +8,7 @@ use mycorrhiza_common::{
 };
 use tracing::info;
 
-use crate::{
+use rust_data_transforms::{
     server::define_routes,
     sql_ingester_tasks::dokito_sql_connection::get_dokito_pool,
     types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET},
@@ -20,17 +20,6 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::LazyLock,
 };
-
-mod case_worker;
-mod data_processing_traits;
-mod indexes;
-mod jurisdiction_schema_mapping;
-mod openscraper_data_traits;
-mod processing;
-mod s3_stuff;
-mod server;
-mod sql_ingester_tasks;
-mod types;
 // use opentelemetry::global::{self, BoxedTracer, ObjectSafeTracerProvider, tracer};
 
 // Note that this clones the document on each request.

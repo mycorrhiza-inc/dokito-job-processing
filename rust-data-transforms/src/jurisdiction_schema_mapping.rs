@@ -1,4 +1,4 @@
-use dokito_types::jurisdictions::JurisdictionInfo;
+use crate::types::jurisdictions::JurisdictionInfo;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

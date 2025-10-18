@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use dokito_types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
+use crate::types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
 use mycorrhiza_common::tasks::{ExecuteUserTask, display_error_as_json};
 
 use schemars::JsonSchema;

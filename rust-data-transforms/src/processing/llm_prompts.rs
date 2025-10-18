@@ -1,4 +1,4 @@
-use dokito_types::processed::{OrganizationType, ProcessedGenericOrganization};
+use crate::types::processed::{OrganizationType, ProcessedGenericOrganization};
 use mycorrhiza_common::llm_deepinfra::{cheap_prompt, strip_think};
 use non_empty_string::NonEmptyString;
 use serde::Serialize;

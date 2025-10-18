@@ -6,7 +6,7 @@ use crate::{
 use aws_sdk_s3::Client;
 use axum::{extract::Path, response::Json};
 use chrono::NaiveDate;
-use dokito_types::{
+use crate::types::{
     env_vars::DIGITALOCEAN_S3, jurisdictions::JurisdictionInfo, processed::ProcessedGenericDocket,
     raw::RawGenericDocket,
 };

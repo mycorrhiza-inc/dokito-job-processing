@@ -1,5 +1,5 @@
 use anyhow::bail;
-use dokito_types::processed::{ProcessedGenericHuman, ProcessedGenericOrganization};
+use crate::types::processed::{ProcessedGenericHuman, ProcessedGenericOrganization};
 use sqlx::{FromRow, PgPool, query_as};
 use std::collections::BTreeSet;
 use uuid::Uuid;

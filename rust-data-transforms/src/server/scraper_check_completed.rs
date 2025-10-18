@@ -1,5 +1,5 @@
 use axum::{Json, extract::Path};
-use dokito_types::{deduplication::DoubleDeduplicated, s3_stuff::list_raw_cases_for_jurisdiction};
+use crate::types::{deduplication::DoubleDeduplicated, s3_stuff::list_raw_cases_for_jurisdiction};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

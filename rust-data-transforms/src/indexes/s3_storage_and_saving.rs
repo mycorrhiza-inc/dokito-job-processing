@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::Path, str::FromStr, sync::Arc};
 
 use aws_sdk_s3::Client;
-use dokito_types::{
+use crate::types::{
     attachments::RawAttachment,
     env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET},
 };

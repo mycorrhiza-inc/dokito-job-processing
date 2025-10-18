@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use dokito_types::{
+use crate::types::{
     env_vars::DIGITALOCEAN_S3,
     jurisdictions::JurisdictionInfo,
     processed::{ProcessedGenericDocket, ProcessedGenericFiling, ProcessedGenericOrganization},

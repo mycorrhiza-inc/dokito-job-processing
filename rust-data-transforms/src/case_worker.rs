@@ -2,7 +2,7 @@ use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::{attachments::OpenscrapersExtraData, process_case};
 use crate::s3_stuff::make_s3_client;
 use async_trait::async_trait;
-use dokito_types::raw::RawDocketWithJurisdiction;
+use crate::types::raw::RawDocketWithJurisdiction;
 use mycorrhiza_common::tasks::ExecuteUserTask;
 
 #[repr(transparent)]

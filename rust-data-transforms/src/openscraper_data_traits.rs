@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 
 use chrono::{NaiveDate, Utc};
-use dokito_types::processed::ProcessedGenericHuman;
-use dokito_types::raw::{RawArtificalPersonType, RawGenericParty};
+use crate::types::processed::ProcessedGenericHuman;
+use crate::types::raw::{RawArtificalPersonType, RawGenericParty};
 use futures::future::join_all;
 use futures::join;
 use futures_util::{StreamExt, stream};
