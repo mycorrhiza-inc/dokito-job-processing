@@ -26,6 +26,34 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+type DokitoBinaryPaths struct {
+	ProcessDocketPath      string
+	UploadDocketPath       string
+	DownloadAttachmentPath string
+}
+
+func getDokitoPaths() DokitoBinaryPaths {
+	// Get binary paths from environment variables - required
+	processDocketsBinaryPath := os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH")
+	uploadDocketsBinaryPath := os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH")
+	downloadAttachmentsBinaryPath := os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH")
+
+	if processDocketsBinaryPath == "" {
+		log.Fatal("❌ DOKITO_PROCESS_DOCKETS_BINARY_PATH environment variable is required")
+	}
+	if uploadDocketsBinaryPath == "" {
+		log.Fatal("❌ DOKITO_UPLOAD_DOCKETS_BINARY_PATH environment variable is required")
+	}
+	if downloadAttachmentsBinaryPath == "" {
+		log.Fatal("❌ DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH environment variable is required")
+	}
+	return DokitoBinaryPaths{
+		ProcessDocketPath:      processDocketsBinaryPath,
+		UploadDocketPath:       uploadDocketsBinaryPath,
+		DownloadAttachmentPath: downloadAttachmentsBinaryPath,
+	}
+}
+
 // JobType represents the category of job
 type JobType string
 
@@ -41,15 +69,15 @@ type ScrapingMode string
 
 const (
 	// NY PUC scraping modes
-	ScrapingModeAll               ScrapingMode = "all"
-	ScrapingModeFull              ScrapingMode = "full"
-	ScrapingModeMetadata          ScrapingMode = "meta"
-	ScrapingModeDocuments         ScrapingMode = "docs"
-	ScrapingModeParties           ScrapingMode = "parties"
-	ScrapingModeDates             ScrapingMode = "dates"
-	ScrapingModeFullExtraction    ScrapingMode = "full-extraction"
+	ScrapingModeAll                 ScrapingMode = "all"
+	ScrapingModeFull                ScrapingMode = "full"
+	ScrapingModeMetadata            ScrapingMode = "meta"
+	ScrapingModeDocuments           ScrapingMode = "docs"
+	ScrapingModeParties             ScrapingMode = "parties"
+	ScrapingModeDates               ScrapingMode = "dates"
+	ScrapingModeFullExtraction      ScrapingMode = "full-extraction"
 	ScrapingModeFilingsBetweenDates ScrapingMode = "filings-between-dates"
-	ScrapingModeCaseList          ScrapingMode = "case-list"
+	ScrapingModeCaseList            ScrapingMode = "case-list"
 )
 
 // PipelineStage represents stages in the processing pipeline
@@ -76,8 +104,8 @@ const (
 
 // BaseJob represents common job fields
 type BaseJob struct {
-	ID     string  `json:"id"`
-	Type   JobType `json:"type"`
+	ID     string   `json:"id"`
+	Type   JobType  `json:"type"`
 	GovIDs []string `json:"gov_ids"`
 }
 
@@ -111,12 +139,12 @@ type CaseListJob struct {
 
 // TimeoutConfig represents timeout configuration for jobs
 type TimeoutConfig struct {
-	ScrapeTimeoutMinutes  int `json:"scrape_timeout_minutes,omitempty"`
-	UploadTimeoutMinutes  int `json:"upload_timeout_minutes,omitempty"`
-	ProcessTimeoutMinutes int `json:"process_timeout_minutes,omitempty"`
-	IngestTimeoutMinutes  int `json:"ingest_timeout_minutes,omitempty"`
+	ScrapeTimeoutMinutes    int `json:"scrape_timeout_minutes,omitempty"`
+	UploadTimeoutMinutes    int `json:"upload_timeout_minutes,omitempty"`
+	ProcessTimeoutMinutes   int `json:"process_timeout_minutes,omitempty"`
+	IngestTimeoutMinutes    int `json:"ingest_timeout_minutes,omitempty"`
 	ContainerTimeoutMinutes int `json:"container_timeout_minutes,omitempty"`
-	HTTPTimeoutSeconds    int `json:"http_timeout_seconds,omitempty"`
+	HTTPTimeoutSeconds      int `json:"http_timeout_seconds,omitempty"`
 }
 
 // RetryConfig represents retry configuration for pipeline stages
@@ -160,16 +188,16 @@ func GetDefaultTimeouts() TimeoutConfig {
 // PipelineJob represents a multi-stage pipeline job
 type PipelineJob struct {
 	BaseJob
-	Stages      []PipelineStage        `json:"stages"`
-	CurrentStage PipelineStage         `json:"current_stage"`
-	StageConfig map[string]interface{} `json:"stage_config,omitempty"`
-	ParentJobID string                 `json:"parent_job_id,omitempty"`
-	Results     map[PipelineStage]interface{} `json:"results,omitempty"`
-	Timeouts    TimeoutConfig          `json:"timeouts,omitempty"`
-	RetryConfig RetryConfig            `json:"retry_config,omitempty"`
-	Completed   bool                   `json:"completed,omitempty"`
-	StageSync   chan PipelineStage     `json:"-"` // For stage synchronization
-	StageRetries map[PipelineStage]int `json:"stage_retries,omitempty"` // Track retries per stage
+	Stages       []PipelineStage               `json:"stages"`
+	CurrentStage PipelineStage                 `json:"current_stage"`
+	StageConfig  map[string]interface{}        `json:"stage_config,omitempty"`
+	ParentJobID  string                        `json:"parent_job_id,omitempty"`
+	Results      map[PipelineStage]interface{} `json:"results,omitempty"`
+	Timeouts     TimeoutConfig                 `json:"timeouts,omitempty"`
+	RetryConfig  RetryConfig                   `json:"retry_config,omitempty"`
+	Completed    bool                          `json:"completed,omitempty"`
+	StageSync    chan PipelineStage            `json:"-"`                       // For stage synchronization
+	StageRetries map[PipelineStage]int         `json:"stage_retries,omitempty"` // Track retries per stage
 }
 
 // WorkerJob represents any job that can be processed by a worker
@@ -180,37 +208,37 @@ type WorkerJob interface {
 }
 
 // Implement WorkerJob interface for all job types
-func (j *BaseJob) GetID() string     { return j.ID }
-func (j *BaseJob) GetType() JobType  { return j.Type }
+func (j *BaseJob) GetID() string       { return j.ID }
+func (j *BaseJob) GetType() JobType    { return j.Type }
 func (j *BaseJob) GetGovIDs() []string { return j.GovIDs }
 
-func (j *ScrapeJob) GetID() string     { return j.BaseJob.GetID() }
-func (j *ScrapeJob) GetType() JobType  { return j.BaseJob.GetType() }
+func (j *ScrapeJob) GetID() string       { return j.BaseJob.GetID() }
+func (j *ScrapeJob) GetType() JobType    { return j.BaseJob.GetType() }
 func (j *ScrapeJob) GetGovIDs() []string { return j.BaseJob.GetGovIDs() }
 
-func (j *DokitoJob) GetID() string     { return j.BaseJob.GetID() }
-func (j *DokitoJob) GetType() JobType  { return j.BaseJob.GetType() }
+func (j *DokitoJob) GetID() string       { return j.BaseJob.GetID() }
+func (j *DokitoJob) GetType() JobType    { return j.BaseJob.GetType() }
 func (j *DokitoJob) GetGovIDs() []string { return j.BaseJob.GetGovIDs() }
 
-func (j *CaseListJob) GetID() string     { return j.BaseJob.GetID() }
-func (j *CaseListJob) GetType() JobType  { return j.BaseJob.GetType() }
+func (j *CaseListJob) GetID() string       { return j.BaseJob.GetID() }
+func (j *CaseListJob) GetType() JobType    { return j.BaseJob.GetType() }
 func (j *CaseListJob) GetGovIDs() []string { return j.BaseJob.GetGovIDs() }
 
-func (j *PipelineJob) GetID() string     { return j.BaseJob.GetID() }
-func (j *PipelineJob) GetType() JobType  { return j.BaseJob.GetType() }
+func (j *PipelineJob) GetID() string       { return j.BaseJob.GetID() }
+func (j *PipelineJob) GetType() JobType    { return j.BaseJob.GetType() }
 func (j *PipelineJob) GetGovIDs() []string { return j.BaseJob.GetGovIDs() }
 
 // WorkerResult represents the result of a worker job
 type WorkerResult struct {
-	JobID     string      `json:"job_id"`
-	JobType   JobType     `json:"job_type"`
-	GovID     string      `json:"gov_id"`
-	Result    interface{} `json:"result"`
-	Error     string      `json:"error,omitempty"`
-	Success   bool        `json:"success"`
+	JobID     string        `json:"job_id"`
+	JobType   JobType       `json:"job_type"`
+	GovID     string        `json:"gov_id"`
+	Result    interface{}   `json:"result"`
+	Error     string        `json:"error,omitempty"`
+	Success   bool          `json:"success"`
 	Stage     PipelineStage `json:"stage,omitempty"` // For pipeline jobs
-	Timestamp time.Time   `json:"timestamp"`
-	Logs      string      `json:"logs,omitempty"` // Container stdout/stderr
+	Timestamp time.Time     `json:"timestamp"`
+	Logs      string        `json:"logs,omitempty"` // Container stdout/stderr
 }
 
 // StreamLogger is an io.Writer that logs output in real-time
@@ -269,7 +297,7 @@ type Runner struct {
 	dokitoBaseURL string
 
 	// Dokito backend container management
-	dokitoClient     *client.Client
+	dokitoClient      *client.Client
 	dokitoContainerID string
 
 	// Queue management
@@ -316,7 +344,7 @@ func getDockerSocketPath() string {
 func CreateScraperContainer(config ContainerConfig) (string, error) {
 	dockerSocket := getDockerSocketPath()
 	log.Printf("Using Docker socket: %s", dockerSocket)
-	
+
 	cli, err := client.NewClientWithOpts(
 		client.WithHost(dockerSocket),
 		client.WithAPIVersionNegotiation(),
@@ -324,14 +352,14 @@ func CreateScraperContainer(config ContainerConfig) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unable to create docker client: %w", err)
 	}
-	
+
 	// Ensure output directory exists
 	log.Printf("Creating output directory: %s", config.OutputDir)
 	if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
 		log.Printf("Failed to create output directory %s: %v", config.OutputDir, err)
 		return "", fmt.Errorf("failed to create output directory: %w", err)
 	}
-	
+
 	// Verify directory exists
 	if _, err := os.Stat(config.OutputDir); err != nil {
 		log.Printf("Output directory verification failed: %v", err)
@@ -364,9 +392,9 @@ func CreateScraperContainer(config ContainerConfig) (string, error) {
 	cont, err := cli.ContainerCreate(
 		context.Background(),
 		&container.Config{
-			Image: config.Image,
-			Env:   env,
-			Cmd:   []string{"node", "scraper-container.js"},
+			Image:      config.Image,
+			Env:        env,
+			Cmd:        []string{"node", "scraper-container.js"},
 			WorkingDir: "/app",
 		},
 		&container.HostConfig{
@@ -379,7 +407,7 @@ func CreateScraperContainer(config ContainerConfig) (string, error) {
 		log.Printf("Container creation failed with error: %v", err)
 		return "", fmt.Errorf("container create failed for image %s: %w", config.Image, err)
 	}
-	
+
 	log.Printf("Container created successfully: %s", cont.ID[:12])
 
 	// Start container
@@ -425,7 +453,7 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 		Follow:     true,
 		Timestamps: true,
 	}
-	
+
 	logReader, err := cli.ContainerLogs(ctx, containerID, logOptions)
 	if err != nil {
 		return -1, "", fmt.Errorf("failed to get container logs: %w", err)
@@ -437,13 +465,13 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 	logsChan := make(chan string, 1)
 	logErrChan := make(chan error, 1)
 	logDoneChan := make(chan struct{}, 1)
-	
+
 	// Stream logs in real-time with proper demultiplexing
 	go func() {
 		defer close(logsChan)
 		defer close(logErrChan)
 		defer close(logDoneChan)
-		
+
 		// Docker multiplexes stdout and stderr into a single stream
 		// We need to demultiplex it using stdcopy.StdCopy
 		_, err := stdcopy.StdCopy(&stdoutBuf, &stderrBuf, logReader)
@@ -451,13 +479,13 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 			logErrChan <- fmt.Errorf("failed to demultiplex container logs: %w", err)
 			return
 		}
-		
+
 		// Combine stdout and stderr into a single log string
 		var combinedLogs bytes.Buffer
-		
+
 		// Always include a header to distinguish between empty logs and no logs
 		combinedLogs.WriteString("=== CONTAINER LOGS ===\n")
-		
+
 		if stdoutBuf.Len() > 0 {
 			combinedLogs.WriteString("=== STDOUT ===\n")
 			combinedLogs.Write(stdoutBuf.Bytes())
@@ -465,7 +493,7 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 		} else {
 			combinedLogs.WriteString("=== STDOUT ===\n(empty)\n")
 		}
-		
+
 		if stderrBuf.Len() > 0 {
 			combinedLogs.WriteString("=== STDERR ===\n")
 			combinedLogs.Write(stderrBuf.Bytes())
@@ -473,19 +501,19 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 		} else {
 			combinedLogs.WriteString("=== STDERR ===\n(empty)\n")
 		}
-		
+
 		combinedLogs.WriteString("=== END LOGS ===\n")
-		
+
 		// Always send something to logsChan, even if logs are empty
 		logsChan <- combinedLogs.String()
 	}()
 
 	// Wait for container completion
 	statusCh, errCh := cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
-	
+
 	var exitCode int64
 	var logs string
-	
+
 	// Wait for container completion first
 	select {
 	case err := <-errCh:
@@ -497,7 +525,7 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 	case <-ctx.Done():
 		return -1, "", fmt.Errorf("timeout waiting for container %s", containerID[:12])
 	}
-	
+
 	// After container completion, wait for logs with increased timeout
 	select {
 	case logs = <-logsChan:
@@ -536,7 +564,7 @@ func WaitForContainerWithLogs(cli *client.Client, containerID string, timeout ti
 			logs = "=== CONTAINER LOGS ===\nLog capture timed out - no logs captured\n=== END LOGS ===\n"
 		}
 	}
-	
+
 	return exitCode, logs, nil
 }
 
@@ -956,8 +984,8 @@ func (r *Runner) stopDokitoBackend() error {
 // waitForDokitoBackend waits for the dokito-backend to be ready
 func (r *Runner) waitForDokitoBackend() error {
 	log.Printf("⏳ Waiting for dokito-backend to be ready at %s...", r.dokitoBaseURL)
-	
-	timeout := time.After(90 * time.Second) // Increased timeout
+
+	timeout := time.After(90 * time.Second)   // Increased timeout
 	ticker := time.NewTicker(3 * time.Second) // Check less frequently
 	defer ticker.Stop()
 
@@ -982,20 +1010,20 @@ func (r *Runner) waitForDokitoBackend() error {
 		case <-ticker.C:
 			attempts++
 			log.Printf("🔍 Health check attempt %d: trying %s/health", attempts, r.dokitoBaseURL)
-			
+
 			client := &http.Client{Timeout: 5 * time.Second}
 			resp, err := client.Get(r.dokitoBaseURL + "/health")
 			if err != nil {
 				log.Printf("❌ Health check failed: %v", err)
 				continue
 			}
-			
+
 			if resp.StatusCode == 200 {
 				resp.Body.Close()
 				log.Printf("✅ Dokito-backend is ready at %s (attempt %d)", r.dokitoBaseURL, attempts)
 				return nil
 			}
-			
+
 			log.Printf("⚠️ Health check returned status %d", resp.StatusCode)
 			resp.Body.Close()
 		}
@@ -1005,18 +1033,18 @@ func (r *Runner) waitForDokitoBackend() error {
 // NewRunner creates a new runner with specified number of workers
 func NewRunner(workerCount int, scraperImage string, workDir string, dokitoBaseURL string) (*Runner, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Ensure work directory exists
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create work directory: %w", err)
 	}
-	
+
 	// Create persistent results directory
 	resultsDir := filepath.Join(workDir, "results")
 	if err := os.MkdirAll(resultsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create results directory: %w", err)
 	}
-	
+
 	// Create Docker client for dokito-backend management
 	dockerSocket := getDockerSocketPath()
 	dokitoClient, err := client.NewClientWithOpts(
@@ -1027,7 +1055,7 @@ func NewRunner(workerCount int, scraperImage string, workDir string, dokitoBaseU
 		cancel()
 		return nil, fmt.Errorf("failed to create docker client for dokito-backend: %w", err)
 	}
-	
+
 	// Initialize queue state
 	queueStatePath := filepath.Join(workDir, "queue_state.json")
 	queueState := NewQueueState("main-queue")
@@ -1060,12 +1088,12 @@ func NewRunner(workerCount int, scraperImage string, workDir string, dokitoBaseU
 		dokitoClient:      dokitoClient,
 		queueState:        queueState,
 		queueStatePath:    queueStatePath,
-		autoSaveQueue:     true, // Enable auto-save by default
-		autoProcessQueue:  true, // Enable auto-processing by default
-		queueBatchSize:    6,    // Process 6 govIDs at a time
-		queuePollInterval: 5 * time.Second, // Check queue every 5 seconds
+		autoSaveQueue:     true,                    // Enable auto-save by default
+		autoProcessQueue:  true,                    // Enable auto-processing by default
+		queueBatchSize:    6,                       // Process 6 govIDs at a time
+		queuePollInterval: 5 * time.Second,         // Check queue every 5 seconds
 		queueWakeupChan:   make(chan struct{}, 10), // Buffered channel for wake-up signals
-		apiEnabled:        true, // Enable API by default
+		apiEnabled:        true,                    // Enable API by default
 	}
 
 	// Ensure dokito-backend is running (handles existing, stopped, or missing containers)
@@ -1144,7 +1172,7 @@ func (w *Worker) run(jobQueue <-chan WorkerJob, resultQueue chan<- WorkerResult,
 	log.Printf("Worker %s starting (using ephemeral containers)", w.ID)
 
 	for {
-		select{
+		select {
 		case <-w.ctx.Done():
 			log.Printf("Worker %s stopping", w.ID)
 			return
@@ -1366,7 +1394,7 @@ func (w *Worker) processScrapeJob(job *ScrapeJob, resultQueue chan<- WorkerResul
 
 	// Create unique output directory for this job
 	outputDir := filepath.Join(w.WorkDir, fmt.Sprintf("job-%s-%d", job.ID, time.Now().Unix()))
-	
+
 	// Configure container
 	config := ContainerConfig{
 		Image:     w.ScraperImage,
@@ -1378,7 +1406,7 @@ func (w *Worker) processScrapeJob(job *ScrapeJob, resultQueue chan<- WorkerResul
 			fmt.Sprintf("WORKER_ID=%s", w.ID),
 		},
 	}
-	
+
 	// Add date parameters if present
 	if job.DateString != "" {
 		config.Environment = append(config.Environment, fmt.Sprintf("DATE_STRING=%s", job.DateString))
@@ -1430,7 +1458,7 @@ func (w *Worker) processScrapeJob(job *ScrapeJob, resultQueue chan<- WorkerResul
 				govResult = genericResult
 			} else {
 				govResult = map[string]interface{}{
-					"error": fmt.Sprintf("No result found for govID %s", govID),
+					"error":             fmt.Sprintf("No result found for govID %s", govID),
 					"available_results": getResultKeys(results),
 				}
 			}
@@ -1476,15 +1504,15 @@ func (w *Worker) processPipelineJob(job *PipelineJob, resultQueue chan<- WorkerR
 	if job.RetryConfig.MaxRetries == 0 {
 		job.RetryConfig = GetDefaultRetryConfig()
 	}
-	
+
 	// Create stage synchronization channel
 	job.StageSync = make(chan PipelineStage, len(job.Stages))
-	
+
 	// Execute all stages sequentially
 	for i, stage := range job.Stages {
 		log.Printf("Pipeline job %s executing stage %d/%d: %s", job.ID, i+1, len(job.Stages), stage)
 		job.CurrentStage = stage
-		
+
 		// Execute the current stage with retry logic
 		stageSuccess := false
 		for attempt := 0; attempt <= job.RetryConfig.MaxRetries && !stageSuccess; attempt++ {
@@ -1495,9 +1523,9 @@ func (w *Worker) processPipelineJob(job *PipelineJob, resultQueue chan<- WorkerR
 				time.Sleep(delay)
 				job.StageRetries[stage] = attempt
 			}
-			
+
 			log.Printf("Pipeline job %s executing stage %s (attempt %d/%d)", job.ID, stage, attempt+1, job.RetryConfig.MaxRetries+1)
-			
+
 			var stageError error
 			switch stage {
 			case PipelineStageScrape:
@@ -1511,7 +1539,7 @@ func (w *Worker) processPipelineJob(job *PipelineJob, resultQueue chan<- WorkerR
 			default:
 				stageError = fmt.Errorf("unknown pipeline stage: %s", stage)
 			}
-			
+
 			if stageError == nil {
 				stageSuccess = true
 				log.Printf("Pipeline job %s stage %s completed successfully on attempt %d", job.ID, stage, attempt+1)
@@ -1527,12 +1555,12 @@ func (w *Worker) processPipelineJob(job *PipelineJob, resultQueue chan<- WorkerR
 				return
 			}
 		}
-		
+
 		if !stageSuccess {
 			w.sendErrorResult(job.ID, JobTypePipeline, "pipeline", fmt.Sprintf("Stage %s failed after all retry attempts", stage), resultQueue)
 			return
 		}
-		
+
 		// Wait for stage completion signal
 		stageTimeout := w.getStageTimeout(stage, job.Timeouts)
 		select {
@@ -1547,17 +1575,17 @@ func (w *Worker) processPipelineJob(job *PipelineJob, resultQueue chan<- WorkerR
 			return
 		}
 	}
-	
+
 	// All stages completed successfully
 	job.Completed = true
 	log.Printf("Pipeline job %s completed all %d stages successfully", job.ID, len(job.Stages))
-	
+
 	// Send final pipeline completion result
 	resultQueue <- WorkerResult{
-		JobID:     job.ID,
-		JobType:   JobTypePipeline,
-		GovID:     "pipeline-complete",
-		Result:    map[string]interface{}{
+		JobID:   job.ID,
+		JobType: JobTypePipeline,
+		GovID:   "pipeline-complete",
+		Result: map[string]interface{}{
 			"completed_stages": job.Stages,
 			"stage_results":    job.Results,
 			"total_stages":     len(job.Stages),
@@ -1570,16 +1598,16 @@ func (w *Worker) processPipelineJob(job *PipelineJob, resultQueue chan<- WorkerR
 // executeScrapeStage executes the scraping stage of the pipeline
 func (w *Worker) executeScrapeStage(job *PipelineJob, resultQueue chan<- WorkerResult) {
 	log.Printf("Executing scrape stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.ScrapeTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Create unique output directory for this pipeline stage
 	outputDir := filepath.Join(w.WorkDir, fmt.Sprintf("pipeline-%s-scrape-%d", job.ID, time.Now().Unix()))
-	
+
 	// Configure container with pipeline-specific settings
 	config := ContainerConfig{
 		Image:     w.ScraperImage,
@@ -1592,12 +1620,12 @@ func (w *Worker) executeScrapeStage(job *PipelineJob, resultQueue chan<- WorkerR
 			fmt.Sprintf("PIPELINE_STAGE=%s", PipelineStageScrape),
 		},
 	}
-	
+
 	// Override mode if specified in stage config
 	if modeStr, ok := job.StageConfig["scrape_mode"].(string); ok {
 		config.Mode = modeStr
 	}
-	
+
 	// Create and start container
 	containerID, err := CreateScraperContainer(config)
 	if err != nil {
@@ -1645,7 +1673,7 @@ func (w *Worker) executeScrapeStage(job *PipelineJob, resultQueue chan<- WorkerR
 	}
 
 	log.Printf("Worker %s completed scrape stage for pipeline job %s", w.ID, job.ID)
-	
+
 	// Signal stage completion
 	if job.StageSync != nil {
 		select {
@@ -1661,44 +1689,44 @@ func (w *Worker) executeScrapeStage(job *PipelineJob, resultQueue chan<- WorkerR
 // executeUploadStage executes the upload stage of the pipeline
 func (w *Worker) executeUploadStage(job *PipelineJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) {
 	log.Printf("Executing upload stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.UploadTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Get results from scrape stage
 	scrapeResults, exists := job.Results[PipelineStageScrape]
 	if !exists {
 		w.sendErrorResult(job.ID, JobTypePipeline, "upload", "No scrape results available for upload", resultQueue)
 		return
 	}
-	
+
 	// Validate scrape results format
 	if scrapeResults == nil {
 		w.sendErrorResult(job.ID, JobTypePipeline, "upload", "Scrape results are nil", resultQueue)
 		return
 	}
-	
+
 	log.Printf("Uploading scrape results to Dokito backend for job %s", job.ID)
-	
+
 	// Upload results to dokito backend with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeouts.UploadTimeoutMinutes)*time.Minute)
 	defer cancel()
-	
+
 	uploadResult, err := w.uploadToDokitoWithContext(ctx, scrapeResults, dokitoBaseURL, timeouts)
 	if err != nil {
 		w.sendErrorResult(job.ID, JobTypePipeline, "upload", fmt.Sprintf("Upload failed: %v", err), resultQueue)
 		return
 	}
-	
+
 	// Store upload results
 	if job.Results == nil {
 		job.Results = make(map[PipelineStage]interface{})
 	}
 	job.Results[PipelineStageUpload] = uploadResult
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypePipeline,
@@ -1708,9 +1736,9 @@ func (w *Worker) executeUploadStage(job *PipelineJob, resultQueue chan<- WorkerR
 		Stage:     PipelineStageUpload,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Worker %s completed upload stage for pipeline job %s", w.ID, job.ID)
-	
+
 	// Signal stage completion
 	if job.StageSync != nil {
 		select {
@@ -1725,44 +1753,44 @@ func (w *Worker) executeUploadStage(job *PipelineJob, resultQueue chan<- WorkerR
 // executeProcessStage executes the processing stage of the pipeline
 func (w *Worker) executeProcessStage(job *PipelineJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) {
 	log.Printf("Executing process stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.ProcessTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Get upload results
 	uploadResults, exists := job.Results[PipelineStageUpload]
 	if !exists {
 		w.sendErrorResult(job.ID, JobTypePipeline, "process", "No upload results available for processing", resultQueue)
 		return
 	}
-	
+
 	// Validate upload results format
 	if uploadResults == nil {
 		w.sendErrorResult(job.ID, JobTypePipeline, "process", "Upload results are nil", resultQueue)
 		return
 	}
-	
+
 	log.Printf("Triggering processing in Dokito backend for job %s", job.ID)
-	
+
 	// Trigger processing in dokito backend with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeouts.ProcessTimeoutMinutes)*time.Minute)
 	defer cancel()
-	
+
 	processResult, err := w.triggerDokitoProcessingWithContext(ctx, job.GetGovIDs(), dokitoBaseURL, timeouts)
 	if err != nil {
 		w.sendErrorResult(job.ID, JobTypePipeline, "process", fmt.Sprintf("Processing failed: %v", err), resultQueue)
 		return
 	}
-	
+
 	// Store process results
 	if job.Results == nil {
 		job.Results = make(map[PipelineStage]interface{})
 	}
 	job.Results[PipelineStageProcess] = processResult
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypePipeline,
@@ -1772,9 +1800,9 @@ func (w *Worker) executeProcessStage(job *PipelineJob, resultQueue chan<- Worker
 		Stage:     PipelineStageProcess,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Worker %s completed process stage for pipeline job %s", w.ID, job.ID)
-	
+
 	// Signal stage completion
 	if job.StageSync != nil {
 		select {
@@ -1789,54 +1817,54 @@ func (w *Worker) executeProcessStage(job *PipelineJob, resultQueue chan<- Worker
 // executeIngestStage executes the ingestion stage of the pipeline
 func (w *Worker) executeIngestStage(job *PipelineJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) {
 	log.Printf("Executing ingest stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.IngestTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Get process results
 	processResults, exists := job.Results[PipelineStageProcess]
 	if !exists {
 		w.sendErrorResult(job.ID, JobTypePipeline, "ingest", "No process results available for ingestion", resultQueue)
 		return
 	}
-	
+
 	// Validate process results format
 	if processResults == nil {
 		w.sendErrorResult(job.ID, JobTypePipeline, "ingest", "Process results are nil", resultQueue)
 		return
 	}
-	
+
 	log.Printf("Triggering ingestion in Dokito backend for job %s", job.ID)
-	
+
 	// Use the govIDs provided with the job
 	govIDs := job.GetGovIDs()
 	if len(govIDs) == 0 {
 		w.sendErrorResult(job.ID, JobTypePipeline, "ingest", "No govIDs available for ingestion", resultQueue)
 		return
 	}
-	
+
 	// Trigger ingestion in dokito backend with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeouts.IngestTimeoutMinutes)*time.Minute)
 	defer cancel()
-	
+
 	ingestResult, err := w.triggerDokitoIngestionWithContext(ctx, govIDs, dokitoBaseURL, timeouts)
 	if err != nil {
 		w.sendErrorResult(job.ID, JobTypePipeline, "ingest", fmt.Sprintf("Ingestion failed: %v", err), resultQueue)
 		return
 	}
-	
+
 	// Store ingest results
 	if job.Results == nil {
 		job.Results = make(map[PipelineStage]interface{})
 	}
 	job.Results[PipelineStageIngest] = ingestResult
-	
+
 	// Mark pipeline as completed
 	job.Completed = true
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypePipeline,
@@ -1846,9 +1874,9 @@ func (w *Worker) executeIngestStage(job *PipelineJob, resultQueue chan<- WorkerR
 		Stage:     PipelineStageIngest,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Pipeline job %s completed all stages successfully", job.ID)
-	
+
 	// Signal final stage completion
 	if job.StageSync != nil {
 		select {
@@ -1935,7 +1963,7 @@ func (w *Worker) executeScrapeStageWithRetry(job *PipelineJob, resultQueue chan<
 	}
 
 	log.Printf("✅ Worker %s completed scrape stage for pipeline job %s using ephemeral container", w.ID, job.ID)
-	
+
 	// Signal stage completion
 	if job.StageSync != nil {
 		select {
@@ -1946,48 +1974,48 @@ func (w *Worker) executeScrapeStageWithRetry(job *PipelineJob, resultQueue chan<
 			log.Printf("Warning: Could not signal completion for scrape stage of job %s", job.ID)
 		}
 	}
-	
+
 	return nil
 }
 
 // executeUploadStageWithRetry executes the upload stage and returns error for retry handling
 func (w *Worker) executeUploadStageWithRetry(job *PipelineJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) error {
 	log.Printf("Executing upload stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.UploadTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Get results from scrape stage
 	scrapeResults, exists := job.Results[PipelineStageScrape]
 	if !exists {
 		return fmt.Errorf("no scrape results available for upload")
 	}
-	
+
 	// Validate scrape results format
 	if scrapeResults == nil {
 		return fmt.Errorf("scrape results are nil")
 	}
-	
+
 	log.Printf("Uploading scrape results to Dokito backend for job %s", job.ID)
-	
+
 	// Upload results to dokito backend with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeouts.UploadTimeoutMinutes)*time.Minute)
 	defer cancel()
-	
+
 	uploadResult, err := w.uploadToDokitoWithContext(ctx, scrapeResults, dokitoBaseURL, timeouts)
 	if err != nil {
 		return fmt.Errorf("upload failed: %w", err)
 	}
-	
+
 	// Store upload results
 	if job.Results == nil {
 		job.Results = make(map[PipelineStage]interface{})
 	}
 	job.Results[PipelineStageUpload] = uploadResult
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypePipeline,
@@ -1997,9 +2025,9 @@ func (w *Worker) executeUploadStageWithRetry(job *PipelineJob, resultQueue chan<
 		Stage:     PipelineStageUpload,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Worker %s completed upload stage for pipeline job %s", w.ID, job.ID)
-	
+
 	// Signal stage completion
 	if job.StageSync != nil {
 		select {
@@ -2009,48 +2037,48 @@ func (w *Worker) executeUploadStageWithRetry(job *PipelineJob, resultQueue chan<
 			log.Printf("Warning: Could not signal completion for upload stage of job %s", job.ID)
 		}
 	}
-	
+
 	return nil
 }
 
 // executeProcessStageWithRetry executes the process stage and returns error for retry handling
 func (w *Worker) executeProcessStageWithRetry(job *PipelineJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) error {
 	log.Printf("Executing process stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.ProcessTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Get upload results
 	uploadResults, exists := job.Results[PipelineStageUpload]
 	if !exists {
 		return fmt.Errorf("no upload results available for processing")
 	}
-	
+
 	// Validate upload results format
 	if uploadResults == nil {
 		return fmt.Errorf("upload results are nil")
 	}
-	
+
 	log.Printf("Triggering processing in Dokito backend for job %s", job.ID)
-	
+
 	// Trigger processing in dokito backend with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeouts.ProcessTimeoutMinutes)*time.Minute)
 	defer cancel()
-	
+
 	processResult, err := w.triggerDokitoProcessingWithContext(ctx, job.GetGovIDs(), dokitoBaseURL, timeouts)
 	if err != nil {
 		return fmt.Errorf("processing failed: %w", err)
 	}
-	
+
 	// Store process results
 	if job.Results == nil {
 		job.Results = make(map[PipelineStage]interface{})
 	}
 	job.Results[PipelineStageProcess] = processResult
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypePipeline,
@@ -2060,9 +2088,9 @@ func (w *Worker) executeProcessStageWithRetry(job *PipelineJob, resultQueue chan
 		Stage:     PipelineStageProcess,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Worker %s completed process stage for pipeline job %s", w.ID, job.ID)
-	
+
 	// Signal stage completion
 	if job.StageSync != nil {
 		select {
@@ -2072,57 +2100,57 @@ func (w *Worker) executeProcessStageWithRetry(job *PipelineJob, resultQueue chan
 			log.Printf("Warning: Could not signal completion for process stage of job %s", job.ID)
 		}
 	}
-	
+
 	return nil
 }
 
 // executeIngestStageWithRetry executes the ingest stage and returns error for retry handling
 func (w *Worker) executeIngestStageWithRetry(job *PipelineJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) error {
 	log.Printf("Executing ingest stage for pipeline job %s", job.ID)
-	
+
 	// Get timeout for this stage
 	timeouts := job.Timeouts
 	if timeouts.IngestTimeoutMinutes == 0 {
 		timeouts = GetDefaultTimeouts()
 	}
-	
+
 	// Get process results
 	processResults, exists := job.Results[PipelineStageProcess]
 	if !exists {
 		return fmt.Errorf("no process results available for ingestion")
 	}
-	
+
 	// Validate process results format
 	if processResults == nil {
 		return fmt.Errorf("process results are nil")
 	}
-	
+
 	log.Printf("Triggering ingestion in Dokito backend for job %s", job.ID)
-	
+
 	// Use the govIDs provided with the job
 	govIDs := job.GetGovIDs()
 	if len(govIDs) == 0 {
 		return fmt.Errorf("no govIDs available for ingestion")
 	}
-	
+
 	// Trigger ingestion in dokito backend with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeouts.IngestTimeoutMinutes)*time.Minute)
 	defer cancel()
-	
+
 	ingestResult, err := w.triggerDokitoIngestionWithContext(ctx, govIDs, dokitoBaseURL, timeouts)
 	if err != nil {
 		return fmt.Errorf("ingestion failed: %w", err)
 	}
-	
+
 	// Store ingest results
 	if job.Results == nil {
 		job.Results = make(map[PipelineStage]interface{})
 	}
 	job.Results[PipelineStageIngest] = ingestResult
-	
+
 	// Mark pipeline as completed
 	job.Completed = true
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypePipeline,
@@ -2132,9 +2160,9 @@ func (w *Worker) executeIngestStageWithRetry(job *PipelineJob, resultQueue chan<
 		Stage:     PipelineStageIngest,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Pipeline job %s completed all stages successfully", job.ID)
-	
+
 	// Signal final stage completion
 	if job.StageSync != nil {
 		select {
@@ -2145,7 +2173,7 @@ func (w *Worker) executeIngestStageWithRetry(job *PipelineJob, resultQueue chan<
 		}
 		close(job.StageSync) // Close the sync channel as pipeline is complete
 	}
-	
+
 	return nil
 }
 
@@ -2173,7 +2201,7 @@ func (w *Worker) isRetryableError(err error, retryConfig RetryConfig) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errorMsg := strings.ToLower(err.Error())
 	for _, retryableError := range retryConfig.RetryableErrors {
 		if strings.Contains(errorMsg, strings.ToLower(retryableError)) {
@@ -2202,23 +2230,23 @@ func (w *Worker) getStageTimeout(stage PipelineStage, timeouts TimeoutConfig) ti
 // processDokitoJob processes Dokito backend API jobs
 func (w *Worker) processDokitoJob(job *DokitoJob, resultQueue chan<- WorkerResult, dokitoBaseURL string) {
 	log.Printf("Worker %s processing dokito job %s with mode %s", w.ID, job.ID, job.Mode)
-	
+
 	var result interface{}
 	var err error
-	
+
 	switch job.Mode {
 	case DokitoModeCaseFetch:
 		result, err = w.dokitoAPICall("GET", dokitoBaseURL+"/api/case", map[string]interface{}{
-			"state":            job.State,
+			"state":             job.State,
 			"jurisdiction_name": job.JurisdictionName,
 			"case_name":         job.CaseName,
 		})
 	case DokitoModeCaseList:
 		result, err = w.dokitoAPICall("GET", dokitoBaseURL+"/api/cases", map[string]interface{}{
-			"state":            job.State,
+			"state":             job.State,
 			"jurisdiction_name": job.JurisdictionName,
-			"limit":            job.Limit,
-			"offset":           job.Offset,
+			"limit":             job.Limit,
+			"offset":            job.Offset,
 		})
 	case DokitoModeAttachmentObj:
 		result, err = w.dokitoAPICall("GET", dokitoBaseURL+"/api/attachment/"+job.Blake2bHash, nil)
@@ -2229,18 +2257,18 @@ func (w *Worker) processDokitoJob(job *DokitoJob, resultQueue chan<- WorkerResul
 	case DokitoModeReprocess:
 		result, err = w.dokitoAPICall("POST", dokitoBaseURL+"/api/reprocess", map[string]interface{}{
 			"operation_type":    job.OperationType,
-			"state":            job.State,
+			"state":             job.State,
 			"jurisdiction_name": job.JurisdictionName,
 		})
 	default:
 		err = fmt.Errorf("unsupported dokito job mode: %s", job.Mode)
 	}
-	
+
 	if err != nil {
 		w.sendErrorResult(job.ID, JobTypeDokito, "dokito", err.Error(), resultQueue)
 		return
 	}
-	
+
 	resultQueue <- WorkerResult{
 		JobID:     job.ID,
 		JobType:   JobTypeDokito,
@@ -2249,7 +2277,7 @@ func (w *Worker) processDokitoJob(job *DokitoJob, resultQueue chan<- WorkerResul
 		Success:   true,
 		Timestamp: time.Now(),
 	}
-	
+
 	log.Printf("Worker %s completed dokito job %s", w.ID, job.ID)
 }
 
@@ -2462,7 +2490,7 @@ func (w *Worker) dokitoAPICall(method, url string, data interface{}) (interface{
 // dokitoAPICallWithContext makes HTTP requests to the Dokito backend API with context
 func (w *Worker) dokitoAPICallWithContext(ctx context.Context, method, url string, data interface{}, timeouts TimeoutConfig) (interface{}, error) {
 	var reqBody io.Reader
-	
+
 	if data != nil {
 		jsonData, err := json.Marshal(data)
 		if err != nil {
@@ -2470,17 +2498,17 @@ func (w *Worker) dokitoAPICallWithContext(ctx context.Context, method, url strin
 		}
 		reqBody = bytes.NewBuffer(jsonData)
 	}
-	
+
 	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	if data != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("User-Agent", fmt.Sprintf("JobRunner-Worker-%s", w.ID))
-	
+
 	// Use configurable timeout
 	httpTimeout := time.Duration(timeouts.HTTPTimeoutSeconds) * time.Second
 	client := &http.Client{Timeout: httpTimeout}
@@ -2489,24 +2517,24 @@ func (w *Worker) dokitoAPICallWithContext(ctx context.Context, method, url strin
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 400 {
 		body, _ := ioutil.ReadAll(resp.Body)
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
 	}
-	
+
 	var result interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
-	
+
 	return result, nil
 }
 
 // convertToRawDockets converts scrape results to Dokito RawGenericDocket format
 func (w *Worker) convertToRawDockets(scrapeResults interface{}) ([]map[string]interface{}, error) {
 	var rawDockets []map[string]interface{}
-	
+
 	// Handle different scrape result formats
 	switch results := scrapeResults.(type) {
 	case map[string]interface{}:
@@ -2515,7 +2543,7 @@ func (w *Worker) convertToRawDockets(scrapeResults interface{}) ([]map[string]in
 			if govID == "summary" || govID == "metadata" {
 				continue // Skip non-docket data
 			}
-			
+
 			docket, err := w.convertSingleResultToRawDocket(govID, resultData)
 			if err != nil {
 				log.Printf("Warning: Failed to convert result for govID %s: %v", govID, err)
@@ -2535,7 +2563,7 @@ func (w *Worker) convertToRawDockets(scrapeResults interface{}) ([]map[string]in
 					}
 				}
 			}
-			
+
 			docket, err := w.convertSingleResultToRawDocket(govID, resultData)
 			if err != nil {
 				log.Printf("Warning: Failed to convert result %d: %v", i, err)
@@ -2546,11 +2574,11 @@ func (w *Worker) convertToRawDockets(scrapeResults interface{}) ([]map[string]in
 	default:
 		return nil, fmt.Errorf("unsupported scrape results format: %T", scrapeResults)
 	}
-	
+
 	if len(rawDockets) == 0 {
 		return nil, fmt.Errorf("no valid dockets could be converted from scrape results")
 	}
-	
+
 	return rawDockets, nil
 }
 
@@ -2560,7 +2588,7 @@ func (w *Worker) convertSingleResultToRawDocket(govID string, resultData interfa
 	if !ok {
 		return nil, fmt.Errorf("result data is not a map: %T", resultData)
 	}
-	
+
 	// Extract case govID
 	caseGovID := govID
 	if extractedGovID, hasGovID := resultMap["case_govid"]; hasGovID {
@@ -2568,34 +2596,33 @@ func (w *Worker) convertSingleResultToRawDocket(govID string, resultData interfa
 			caseGovID = govIDStr
 		}
 	}
-	
+
 	// Create RawGenericDocket structure according to Dokito types
 	rawDocket := map[string]interface{}{
-		"case_govid": caseGovID,
-		"state":      "ny", // Assuming NY PUC for now
+		"case_govid":        caseGovID,
+		"state":             "ny", // Assuming NY PUC for now
 		"jurisdiction_name": "ny_puc",
 		"scraper_metadata": map[string]interface{}{
-			"worker_id":   w.ID,
-			"timestamp":   time.Now().Format(time.RFC3339),
-			"source":      "jobrunner",
+			"worker_id": w.ID,
+			"timestamp": time.Now().Format(time.RFC3339),
+			"source":    "jobrunner",
 		},
 	}
-	
+
 	// Add all other fields from the scrape result
 	for key, value := range resultMap {
 		if key != "case_govid" { // Don't duplicate case_govid
 			rawDocket[key] = value
 		}
 	}
-	
+
 	return rawDocket, nil
 }
-
 
 // extractGovIDsFromScrapeResults extracts govIDs from original scrape results as fallback
 func (w *Worker) extractGovIDsFromScrapeResults(scrapeResults interface{}) ([]string, error) {
 	var govIDs []string
-	
+
 	switch res := scrapeResults.(type) {
 	case map[string]interface{}:
 		// Try to extract from top-level keys that look like govIDs
@@ -2605,7 +2632,7 @@ func (w *Worker) extractGovIDsFromScrapeResults(scrapeResults interface{}) ([]st
 				govIDs = append(govIDs, key)
 			}
 		}
-		
+
 		// Also check if there's a summary with gov_ids
 		if summary, hasSummary := res["summary"]; hasSummary {
 			if summaryMap, ok := summary.(map[string]interface{}); ok {
@@ -2634,11 +2661,11 @@ func (w *Worker) extractGovIDsFromScrapeResults(scrapeResults interface{}) ([]st
 	default:
 		return nil, fmt.Errorf("unsupported scrape results format for govID extraction: %T", scrapeResults)
 	}
-	
+
 	if len(govIDs) == 0 {
 		return nil, fmt.Errorf("no govIDs could be extracted from scrape results")
 	}
-	
+
 	// Remove duplicates
 	govIDSet := make(map[string]bool)
 	var uniqueGovIDs []string
@@ -2648,7 +2675,7 @@ func (w *Worker) extractGovIDsFromScrapeResults(scrapeResults interface{}) ([]st
 			uniqueGovIDs = append(uniqueGovIDs, govID)
 		}
 	}
-	
+
 	return uniqueGovIDs, nil
 }
 
@@ -2663,32 +2690,32 @@ func (w *Worker) uploadToDokito(scrapeResults interface{}, dokitoBaseURL string)
 // uploadToDokitoWithContext uploads scraped data to the Dokito backend with context
 func (w *Worker) uploadToDokitoWithContext(ctx context.Context, scrapeResults interface{}, dokitoBaseURL string, timeouts TimeoutConfig) (interface{}, error) {
 	log.Printf("Worker %s uploading scrape results to Dokito backend", w.ID)
-	
+
 	// Convert scrape results to Dokito RawGenericDocket format
 	rawDockets, err := w.convertToRawDockets(scrapeResults)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert scrape results to raw dockets: %w", err)
 	}
-	
+
 	uploadData := map[string]interface{}{
 		"action":  "upload_raw",
 		"dockets": rawDockets,
 	}
-	
+
 	// Use the correct Dokito endpoint for uploading raw dockets
 	// Assuming NY PUC for now - this should be configurable
 	url := fmt.Sprintf("%s/admin/docket-process/ny/ny_puc/raw-dockets", dokitoBaseURL)
-	
+
 	uploadResult, err := w.dokitoAPICallWithContext(ctx, "POST", url, uploadData, timeouts)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Check the upload response for errors
 	if err := w.validateUploadResponse(uploadResult); err != nil {
 		return nil, fmt.Errorf("upload failed: %w", err)
 	}
-	
+
 	return uploadResult, nil
 }
 
@@ -2698,7 +2725,7 @@ func (w *Worker) validateUploadResponse(uploadResult interface{}) error {
 	if !ok {
 		return fmt.Errorf("upload response is not a valid map: %T", uploadResult)
 	}
-	
+
 	// Check for error_count field
 	if errorCount, hasErrorCount := resultMap["error_count"]; hasErrorCount {
 		if errorCountNum, ok := errorCount.(float64); ok && errorCountNum > 0 {
@@ -2711,7 +2738,7 @@ func (w *Worker) validateUploadResponse(uploadResult interface{}) error {
 			return fmt.Errorf("dokito backend upload failed: %v errors, %v successes", errorCountNum, successCount)
 		}
 	}
-	
+
 	// Check for empty successfully_processed_dockets
 	if processedDockets, hasProcessed := resultMap["successfully_processed_dockets"]; hasProcessed {
 		if docketArray, ok := processedDockets.([]interface{}); ok && len(docketArray) == 0 {
@@ -2723,7 +2750,7 @@ func (w *Worker) validateUploadResponse(uploadResult interface{}) error {
 			}
 		}
 	}
-	
+
 	log.Printf("Worker %s: Upload validation passed", w.ID)
 	return nil
 }
@@ -2733,18 +2760,18 @@ func (w *Worker) triggerDokitoProcessing(govIDs []string, dokitoBaseURL string) 
 	defaultTimeouts := GetDefaultTimeouts()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(defaultTimeouts.HTTPTimeoutSeconds)*time.Second)
 	defer cancel()
-	
+
 	return w.triggerDokitoProcessingWithContext(ctx, govIDs, dokitoBaseURL, defaultTimeouts)
 }
 
 // triggerDokitoProcessingWithContext triggers processing of uploaded data in Dokito backend with context
 func (w *Worker) triggerDokitoProcessingWithContext(ctx context.Context, govIDs []string, dokitoBaseURL string, timeouts TimeoutConfig) (interface{}, error) {
 	log.Printf("Worker %s triggering Dokito processing for govIDs: %v", w.ID, govIDs)
-	
+
 	processData := map[string]interface{}{
 		"docket_ids": govIDs,
 	}
-	
+
 	// Use the correct Dokito endpoint for processing by govID
 	url := fmt.Sprintf("%s/admin/docket-process/ny/ny_puc/govid/process", dokitoBaseURL)
 	return w.dokitoAPICallWithContext(ctx, "POST", url, processData, timeouts)
@@ -2761,16 +2788,15 @@ func (w *Worker) triggerDokitoIngestion(govIDs []string, dokitoBaseURL string) (
 // triggerDokitoIngestionWithContext triggers ingestion of processed data in Dokito backend with context
 func (w *Worker) triggerDokitoIngestionWithContext(ctx context.Context, govIDs []string, dokitoBaseURL string, timeouts TimeoutConfig) (interface{}, error) {
 	log.Printf("Worker %s triggering Dokito ingestion for govIDs: %v", w.ID, govIDs)
-	
+
 	ingestData := map[string]interface{}{
 		"docket_ids": govIDs,
 	}
-	
+
 	// Use the correct Dokito endpoint for ingestion by govID
 	url := fmt.Sprintf("%s/admin/docket-process/ny/ny_puc/govid/ingest", dokitoBaseURL)
 	return w.dokitoAPICallWithContext(ctx, "POST", url, ingestData, timeouts)
 }
-
 
 // GovIDPartition represents a partition of gov IDs for map-reduce processing
 type GovIDPartition struct {
@@ -2785,31 +2811,31 @@ func (r *Runner) partitionGovIDs(govIDs []string, maxPartitionSize int) []GovIDP
 	if len(govIDs) == 0 {
 		return []GovIDPartition{}
 	}
-	
+
 	if maxPartitionSize <= 0 {
 		maxPartitionSize = 6 // Default partition size
 	}
-	
+
 	var partitions []GovIDPartition
 	partitionID := 0
-	
+
 	for i := 0; i < len(govIDs); i += maxPartitionSize {
 		end := i + maxPartitionSize
 		if end > len(govIDs) {
 			end = len(govIDs)
 		}
-		
+
 		partition := GovIDPartition{
 			PartitionID: partitionID,
 			GovIDs:      govIDs[i:end],
 			StartIndex:  i,
 			EndIndex:    end,
 		}
-		
+
 		partitions = append(partitions, partition)
 		partitionID++
 	}
-	
+
 	log.Printf("Partitioned %d govIDs into %d partitions (max size: %d)", len(govIDs), len(partitions), maxPartitionSize)
 	return partitions
 }
@@ -2831,7 +2857,7 @@ type MapReduceResult struct {
 func (r *Runner) processGovIDsMapReduce(baseJob BaseJob, jobConfig interface{}, maxPartitionSize int) *MapReduceResult {
 	startTime := time.Now()
 	log.Printf("Starting map-reduce processing for job %s with %d govIDs", baseJob.ID, len(baseJob.GovIDs))
-	
+
 	// Partition the gov IDs
 	partitions := r.partitionGovIDs(baseJob.GovIDs, maxPartitionSize)
 	if len(partitions) == 0 {
@@ -2843,11 +2869,11 @@ func (r *Runner) processGovIDsMapReduce(baseJob BaseJob, jobConfig interface{}, 
 			EndTime:   time.Now(),
 		}
 	}
-	
+
 	// Channel to collect partition results
 	partitionResults := make(chan map[string]interface{}, len(partitions))
 	partitionErrors := make(chan string, len(partitions))
-	
+
 	// Process each partition in parallel
 	var wg sync.WaitGroup
 	for _, partition := range partitions {
@@ -2857,26 +2883,26 @@ func (r *Runner) processGovIDsMapReduce(baseJob BaseJob, jobConfig interface{}, 
 			r.processPartition(baseJob, p, jobConfig, partitionResults, partitionErrors)
 		}(partition)
 	}
-	
+
 	// Wait for all partitions to complete
 	wg.Wait()
 	close(partitionResults)
 	close(partitionErrors)
-	
+
 	// Reduce: aggregate results from all partitions
 	combinedResults := make(map[string]interface{})
 	var errors []string
-	
+
 	for result := range partitionResults {
 		for k, v := range result {
 			combinedResults[k] = v
 		}
 	}
-	
+
 	for err := range partitionErrors {
 		errors = append(errors, err)
 	}
-	
+
 	endTime := time.Now()
 	result := &MapReduceResult{
 		JobID:       baseJob.ID,
@@ -2889,23 +2915,23 @@ func (r *Runner) processGovIDsMapReduce(baseJob BaseJob, jobConfig interface{}, 
 		EndTime:     endTime,
 		Duration:    endTime.Sub(startTime),
 	}
-	
-	log.Printf("Map-reduce processing completed for job %s: %d/%d partitions successful, duration: %v", 
+
+	log.Printf("Map-reduce processing completed for job %s: %d/%d partitions successful, duration: %v",
 		baseJob.ID, len(partitions)-len(errors), len(partitions), result.Duration)
-	
+
 	return result
 }
 
 // processPartition processes a single partition of gov IDs
-func (r *Runner) processPartition(baseJob BaseJob, partition GovIDPartition, jobConfig interface{}, 
-	results chan<- map[string]interface{}, errors chan<- string) {
-	
-	log.Printf("Processing partition %d for job %s (%d govIDs: %v)", 
+func (r *Runner) processPartition(baseJob BaseJob, partition GovIDPartition, jobConfig interface{},
+	results chan<- map[string]interface{}, errors chan<- string,
+) {
+	log.Printf("Processing partition %d for job %s (%d govIDs: %v)",
 		partition.PartitionID, baseJob.ID, len(partition.GovIDs), partition.GovIDs)
-	
+
 	// Create a partition-specific job
 	partitionJobID := fmt.Sprintf("%s-partition-%d", baseJob.ID, partition.PartitionID)
-	
+
 	// Create job based on type
 	var partitionJob WorkerJob
 	switch baseJob.Type {
@@ -2961,12 +2987,12 @@ func (r *Runner) processPartition(baseJob BaseJob, partition GovIDPartition, job
 		errors <- fmt.Sprintf("Unsupported job type for partition: %s", baseJob.Type)
 		return
 	}
-	
+
 	if partitionJob == nil {
 		errors <- fmt.Sprintf("Failed to create partition job for partition %d", partition.PartitionID)
 		return
 	}
-	
+
 	// Submit partition job and collect results with configurable timeout
 	partitionTimeout := 5 * time.Minute // Default timeout
 	if pipelineJob, ok := jobConfig.(*PipelineJob); ok && pipelineJob.Timeouts.ScrapeTimeoutMinutes > 0 {
@@ -2978,7 +3004,7 @@ func (r *Runner) processPartition(baseJob BaseJob, partition GovIDPartition, job
 		errors <- fmt.Sprintf("No results received for partition %d", partition.PartitionID)
 		return
 	}
-	
+
 	results <- partitionResults
 	log.Printf("Partition %d completed successfully with %d results", partition.PartitionID, len(partitionResults))
 }
@@ -2990,19 +3016,19 @@ func (r *Runner) submitJobAndWait(job WorkerJob, timeout time.Duration) map[stri
 	if job.GetType() == JobTypePipeline {
 		expectedResults = 1 // Pipeline jobs typically return one result per stage
 	}
-	
+
 	// Temporarily redirect results to our channel
 	originalQueue := r.resultQueue
 	r.resultQueue = resultsChan
-	
+
 	// Submit the job
 	r.submitJobToWorker(job)
-	
+
 	// Wait for results with timeout
 	results := make(map[string]interface{})
 	timeoutChan := time.After(timeout)
 	receivedCount := 0
-	
+
 waitLoop:
 	for {
 		select {
@@ -3025,27 +3051,27 @@ waitLoop:
 			break waitLoop
 		}
 	}
-	
+
 	// Restore original result queue
 	r.resultQueue = originalQueue
-	
+
 	return results
 }
 
 // storeJobResult stores the job result and log files persistently
 func (r *Runner) storeJobResult(result WorkerResult) error {
 	// Create job-specific directory
-	jobDir := filepath.Join(r.resultsDir, fmt.Sprintf("%s_%s_%s", 
+	jobDir := filepath.Join(r.resultsDir, fmt.Sprintf("%s_%s_%s",
 		result.JobID, result.GovID, result.Timestamp.Format("20060102_150405")))
-	
+
 	if err := os.MkdirAll(jobDir, 0755); err != nil {
 		return fmt.Errorf("failed to create job directory: %w", err)
 	}
-	
+
 	// Store result.json
 	resultFile := filepath.Join(jobDir, "result.json")
 	var resultData interface{}
-	
+
 	if result.Success {
 		resultData = result.Result
 	} else {
@@ -3058,19 +3084,19 @@ func (r *Runner) storeJobResult(result WorkerResult) error {
 			"success":   false,
 		}
 	}
-	
+
 	resultJSON, err := json.MarshalIndent(resultData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal result: %w", err)
 	}
-	
+
 	if err := os.WriteFile(resultFile, resultJSON, 0644); err != nil {
 		return fmt.Errorf("failed to write result file: %w", err)
 	}
-	
+
 	// Store logfile with container stdout/stderr
 	logFile := filepath.Join(jobDir, "logfile.txt")
-	
+
 	var logData string
 	if result.Logs != "" {
 		// Use the actual container logs
@@ -3086,21 +3112,21 @@ Timestamp: %s
 Success: %v
 Duration: %v
 
-`, result.JobID, result.GovID, result.JobType, 
-			result.Timestamp.Format("2006-01-02 15:04:05"), result.Success, 
+`, result.JobID, result.GovID, result.JobType,
+			result.Timestamp.Format("2006-01-02 15:04:05"), result.Success,
 			time.Since(result.Timestamp))
-		
+
 		if result.Success {
 			logData += fmt.Sprintf("Result: Successfully processed %s\n", result.GovID)
 		} else {
 			logData += fmt.Sprintf("Error: %s\n", result.Error)
 		}
 	}
-	
+
 	if err := os.WriteFile(logFile, []byte(logData), 0644); err != nil {
 		return fmt.Errorf("failed to write log file: %w", err)
 	}
-	
+
 	log.Printf("📁 Stored job files: %s", jobDir)
 	return nil
 }
@@ -3126,7 +3152,7 @@ func (r *Runner) collectResults() {
 				}
 			}
 			r.resultsMux.Unlock()
-			
+
 			// Store result and log files persistently
 			if err := r.storeJobResult(result); err != nil {
 				log.Printf("Failed to store job result: %v", err)
@@ -3152,7 +3178,7 @@ func (r *Runner) collectResults() {
 // SubmitScrapeJob submits a scraping job to be processed by workers
 func (r *Runner) SubmitScrapeJob(govIDs []string, mode ScrapingMode, useMapReduce bool, maxPartitionSize int) string {
 	jobID := fmt.Sprintf("scrape-%d", time.Now().UnixNano())
-	
+
 	job := &ScrapeJob{
 		BaseJob: BaseJob{
 			ID:     jobID,
@@ -3171,14 +3197,14 @@ func (r *Runner) SubmitScrapeJob(govIDs []string, mode ScrapingMode, useMapReduc
 	} else {
 		r.submitJobToWorker(job)
 	}
-	
+
 	return jobID
 }
 
 // SubmitScrapeJobWithDates submits a scraping job with date parameters
 func (r *Runner) SubmitScrapeJobWithDates(govIDs []string, mode ScrapingMode, dateString, beginDate, endDate string) string {
 	jobID := fmt.Sprintf("scrape-dates-%d", time.Now().UnixNano())
-	
+
 	job := &ScrapeJob{
 		BaseJob: BaseJob{
 			ID:     jobID,
@@ -3297,7 +3323,7 @@ func (r *Runner) SubmitPipelineJobWithTimeoutsToWorker(govIDs []string, stages [
 // SubmitDokitoJob submits a Dokito backend API job
 func (r *Runner) SubmitDokitoJob(mode DokitoMode, state, jurisdictionName, caseName, hash string, caseData interface{}, operationType string, limit, offset int) string {
 	jobID := fmt.Sprintf("dokito-%d", time.Now().UnixNano())
-	
+
 	job := &DokitoJob{
 		BaseJob: BaseJob{
 			ID:     jobID,
@@ -3336,10 +3362,10 @@ func (r *Runner) SubmitPipelineJobForGovIDs(govIDs []string) string {
 
 	// Default configuration for complete pipeline
 	stageConfig := map[string]interface{}{
-		"scrape_mode":     "all",
-		"upload_format":   "json",
-		"process_type":    "standard",
-		"validate_data":   true,
+		"scrape_mode":   "all",
+		"upload_format": "json",
+		"process_type":  "standard",
+		"validate_data": true,
 	}
 
 	// Use map-reduce for multiple govIDs
@@ -3361,10 +3387,10 @@ func (r *Runner) SubmitPipelineJobForGovIDsToWorker(govIDs []string, workerID st
 
 	// Default configuration for complete pipeline
 	stageConfig := map[string]interface{}{
-		"scrape_mode":     "all",
-		"upload_format":   "json",
-		"process_type":    "standard",
-		"validate_data":   true,
+		"scrape_mode":   "all",
+		"upload_format": "json",
+		"process_type":  "standard",
+		"validate_data": true,
 	}
 
 	// Use map-reduce for multiple govIDs
@@ -3425,7 +3451,7 @@ type JobSummary struct {
 func (r *Runner) GetResults() map[string]interface{} {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	results := make(map[string]interface{})
 	for k, v := range r.results {
 		results[k] = v
@@ -3437,7 +3463,7 @@ func (r *Runner) GetResults() map[string]interface{} {
 func (r *Runner) GetResult(key string) (interface{}, bool) {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	result, exists := r.results[key]
 	return result, exists
 }
@@ -3446,7 +3472,7 @@ func (r *Runner) GetResult(key string) (interface{}, bool) {
 func (r *Runner) GetJobResults(jobID string) map[string]interface{} {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	jobResults := make(map[string]interface{})
 	for key, result := range r.results {
 		if strings.HasPrefix(key, jobID+"_") {
@@ -3460,13 +3486,13 @@ func (r *Runner) GetJobResults(jobID string) map[string]interface{} {
 // GetJobSummary returns a summary of job execution
 func (r *Runner) GetJobSummary(jobID string) *JobSummary {
 	jobResults := r.GetJobResults(jobID)
-	
+
 	summary := &JobSummary{
 		JobID:   jobID,
 		Results: make(map[string]interface{}),
 		Errors:  []string{},
 	}
-	
+
 	for govID, result := range jobResults {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if errorMsg, hasError := resultMap["error"]; hasError {
@@ -3478,7 +3504,7 @@ func (r *Runner) GetJobSummary(jobID string) *JobSummary {
 				summary.Successful++
 				summary.Results[govID] = result
 			}
-			
+
 			// Extract job type if available
 			if jobType, hasType := resultMap["job_type"]; hasType {
 				if typeStr, ok := jobType.(string); ok {
@@ -3490,7 +3516,7 @@ func (r *Runner) GetJobSummary(jobID string) *JobSummary {
 			summary.Results[govID] = result
 		}
 	}
-	
+
 	summary.TotalGovIDs = summary.Successful + summary.Failed
 	return summary
 }
@@ -3499,9 +3525,9 @@ func (r *Runner) GetJobSummary(jobID string) *JobSummary {
 func (r *Runner) GetAllJobSummaries() map[string]*JobSummary {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	jobMap := make(map[string]*JobSummary)
-	
+
 	// Extract unique job IDs
 	jobIDs := make(map[string]bool)
 	for key := range r.results {
@@ -3510,12 +3536,12 @@ func (r *Runner) GetAllJobSummaries() map[string]*JobSummary {
 			jobIDs[parts[0]] = true
 		}
 	}
-	
+
 	// Generate summary for each job
 	for jobID := range jobIDs {
 		jobMap[jobID] = r.GetJobSummary(jobID)
 	}
-	
+
 	return jobMap
 }
 
@@ -3523,9 +3549,9 @@ func (r *Runner) GetAllJobSummaries() map[string]*JobSummary {
 func (r *Runner) AggregateResultsByType() map[JobType]map[string]interface{} {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	aggregated := make(map[JobType]map[string]interface{})
-	
+
 	for key, result := range r.results {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if jobTypeStr, hasType := resultMap["job_type"]; hasType {
@@ -3539,7 +3565,7 @@ func (r *Runner) AggregateResultsByType() map[JobType]map[string]interface{} {
 			}
 		}
 	}
-	
+
 	return aggregated
 }
 
@@ -3547,9 +3573,9 @@ func (r *Runner) AggregateResultsByType() map[JobType]map[string]interface{} {
 func (r *Runner) GetSuccessfulResults() map[string]interface{} {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	successful := make(map[string]interface{})
-	
+
 	for key, result := range r.results {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if _, hasError := resultMap["error"]; !hasError {
@@ -3560,7 +3586,7 @@ func (r *Runner) GetSuccessfulResults() map[string]interface{} {
 			successful[key] = result
 		}
 	}
-	
+
 	return successful
 }
 
@@ -3568,9 +3594,9 @@ func (r *Runner) GetSuccessfulResults() map[string]interface{} {
 func (r *Runner) GetFailedResults() map[string]interface{} {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	failed := make(map[string]interface{})
-	
+
 	for key, result := range r.results {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if _, hasError := resultMap["error"]; hasError {
@@ -3578,7 +3604,7 @@ func (r *Runner) GetFailedResults() map[string]interface{} {
 			}
 		}
 	}
-	
+
 	return failed
 }
 
@@ -4082,13 +4108,13 @@ func (r *Runner) StopAPIServer() error {
 func (r *Runner) GetStats() map[string]interface{} {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	totalResults := len(r.results)
 	successful := 0
 	failed := 0
-	
+
 	jobTypes := make(map[JobType]int)
-	
+
 	for _, result := range r.results {
 		if resultMap, ok := result.(map[string]interface{}); ok {
 			if _, hasError := resultMap["error"]; hasError {
@@ -4096,7 +4122,7 @@ func (r *Runner) GetStats() map[string]interface{} {
 			} else {
 				successful++
 			}
-			
+
 			if jobTypeStr, hasType := resultMap["job_type"]; hasType {
 				if typeStr, ok := jobTypeStr.(string); ok {
 					jobType := JobType(typeStr)
@@ -4107,7 +4133,7 @@ func (r *Runner) GetStats() map[string]interface{} {
 			successful++
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"total_results":   totalResults,
 		"successful":      successful,
@@ -4137,16 +4163,16 @@ type PipelineProgress struct {
 func (r *Runner) TrackPipelineProgress(jobID string, stage PipelineStage, result interface{}, err error) {
 	r.resultsMux.Lock()
 	defer r.resultsMux.Unlock()
-	
+
 	progressKey := fmt.Sprintf("pipeline_progress_%s", jobID)
 	var progress *PipelineProgress
-	
+
 	if existing, exists := r.results[progressKey]; exists {
 		if p, ok := existing.(*PipelineProgress); ok {
 			progress = p
 		}
 	}
-	
+
 	if progress == nil {
 		progress = &PipelineProgress{
 			JobID:        jobID,
@@ -4156,25 +4182,25 @@ func (r *Runner) TrackPipelineProgress(jobID string, stage PipelineStage, result
 			Status:       "running",
 		}
 	}
-	
+
 	progress.CurrentStage = stage
 	progress.LastUpdate = time.Now()
-	
+
 	if err != nil {
 		progress.Errors = append(progress.Errors, fmt.Sprintf("%s: %v", stage, err))
 		progress.Status = "failed"
 	} else {
 		progress.StageResults[stage] = result
 		progress.CompletedStages++
-		
+
 		// Check if all stages are completed
 		if progress.CompletedStages >= progress.TotalStages {
 			progress.Status = "completed"
 		}
 	}
-	
+
 	r.results[progressKey] = progress
-	log.Printf("Pipeline progress updated for job %s: stage %s, status %s (%d/%d stages)", 
+	log.Printf("Pipeline progress updated for job %s: stage %s, status %s (%d/%d stages)",
 		jobID, stage, progress.Status, progress.CompletedStages, progress.TotalStages)
 }
 
@@ -4182,7 +4208,7 @@ func (r *Runner) TrackPipelineProgress(jobID string, stage PipelineStage, result
 func (r *Runner) GetPipelineProgress(jobID string) *PipelineProgress {
 	r.resultsMux.RLock()
 	defer r.resultsMux.RUnlock()
-	
+
 	progressKey := fmt.Sprintf("pipeline_progress_%s", jobID)
 	if existing, exists := r.results[progressKey]; exists {
 		if progress, ok := existing.(*PipelineProgress); ok {
@@ -4227,32 +4253,32 @@ func (r *Runner) PrintStats() {
 
 func main() {
 	// Parse command-line flags
-	var pipelineMode = flag.Bool("pipeline", false, "Execute full pipeline (scrape -> upload -> process -> ingest)")
-	var govIDsFlag = flag.String("govids", "", "Comma-separated list of Gov IDs to process")
-	var helpFlag = flag.Bool("help", false, "Show help information")
+	pipelineMode := flag.Bool("pipeline", false, "Execute full pipeline (scrape -> upload -> process -> ingest)")
+	govIDsFlag := flag.String("govids", "", "Comma-separated list of Gov IDs to process")
+	helpFlag := flag.Bool("help", false, "Show help information")
 
 	// Queue management flags
-	var queueAddFlag = flag.String("queue-add", "", "Add comma-separated Gov IDs to the queue")
-	var queueStatusFlag = flag.Bool("queue-status", false, "Show current queue status")
-	var queueLoadFlag = flag.String("queue-load", "", "Load queue state from file")
-	var queueSaveFlag = flag.String("queue-save", "", "Save queue state to file")
-	var queueRetryFlag = flag.Bool("queue-retry", false, "Retry all failed Gov IDs in queue")
-	var queueProcessFlag = flag.Bool("queue-process", false, "Start processing Gov IDs from the queue")
-	var queueBatchSize = flag.Int("queue-batch-size", 6, "Number of Gov IDs to process in each batch")
+	queueAddFlag := flag.String("queue-add", "", "Add comma-separated Gov IDs to the queue")
+	queueStatusFlag := flag.Bool("queue-status", false, "Show current queue status")
+	queueLoadFlag := flag.String("queue-load", "", "Load queue state from file")
+	queueSaveFlag := flag.String("queue-save", "", "Save queue state to file")
+	queueRetryFlag := flag.Bool("queue-retry", false, "Retry all failed Gov IDs in queue")
+	queueProcessFlag := flag.Bool("queue-process", false, "Start processing Gov IDs from the queue")
+	queueBatchSize := flag.Int("queue-batch-size", 6, "Number of Gov IDs to process in each batch")
 
 	// API server flags
-	var apiPort = flag.Int("api-port", 8080, "HTTP API server port")
-	var noAPI = flag.Bool("no-api", false, "Disable HTTP API server")
+	apiPort := flag.Int("api-port", 8080, "HTTP API server port")
+	noAPI := flag.Bool("no-api", false, "Disable HTTP API server")
 
 	// Auto-processing flags
-	var noAutoProcess = flag.Bool("no-auto-process", false, "Disable automatic queue processing in daemon mode")
-	var autoBatchSize = flag.Int("auto-batch-size", 5, "Batch size for automatic queue processing")
-	var autoPollInterval = flag.Duration("auto-poll-interval", 5*time.Second, "Queue polling interval for auto-processing")
+	noAutoProcess := flag.Bool("no-auto-process", false, "Disable automatic queue processing in daemon mode")
+	autoBatchSize := flag.Int("auto-batch-size", 5, "Batch size for automatic queue processing")
+	autoPollInterval := flag.Duration("auto-poll-interval", 5*time.Second, "Queue polling interval for auto-processing")
 
 	// Caselist polling flags
-	var enableCaselistPolling = flag.Bool("enable-caselist-polling", false, "Enable automatic caselist polling")
-	var caselistFirstRunOnly = flag.Bool("caselist-first-run-only", true, "Run caselist poll only once")
-	var caselistPollInterval = flag.Duration("caselist-poll-interval", 1*time.Hour, "Caselist polling interval")
+	enableCaselistPolling := flag.Bool("enable-caselist-polling", false, "Enable automatic caselist polling")
+	caselistFirstRunOnly := flag.Bool("caselist-first-run-only", true, "Run caselist poll only once")
+	caselistPollInterval := flag.Duration("caselist-poll-interval", 1*time.Hour, "Caselist polling interval")
 
 	flag.Parse()
 
@@ -4292,40 +4318,25 @@ func main() {
 	if scraperImage == "" {
 		scraperImage = "jobrunner-worker:latest"
 	}
-	
+
 	workDir := os.Getenv("WORK_DIR")
 	if workDir == "" {
 		workDir = "./output"
 	}
-	
+
 	// Convert to absolute path for Docker mount compatibility
 	absWorkDir, err := filepath.Abs(workDir)
 	if err != nil {
 		log.Fatalf("Failed to convert work directory to absolute path: %v", err)
 	}
 	workDir = absWorkDir
-	
+
 	// ALWAYS use REAL dokito backend - NO MOCKS
 	dokitoBaseURL := os.Getenv("DOKITO_BACKEND_URL")
 	if dokitoBaseURL == "" {
 		dokitoBaseURL = "http://localhost:8123"
 	}
 
-	// Get binary paths from environment variables - required
-	processDocketsBinaryPath := os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH")
-	uploadDocketsBinaryPath := os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH")
-	downloadAttachmentsBinaryPath := os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH")
-
-	if processDocketsBinaryPath == "" {
-		log.Fatal("❌ DOKITO_PROCESS_DOCKETS_BINARY_PATH environment variable is required")
-	}
-	if uploadDocketsBinaryPath == "" {
-		log.Fatal("❌ DOKITO_UPLOAD_DOCKETS_BINARY_PATH environment variable is required")
-	}
-	if downloadAttachmentsBinaryPath == "" {
-		log.Fatal("❌ DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH environment variable is required")
-	}
-	
 	// Create runner
 	runner, err := NewRunner(workerCount, scraperImage, workDir, dokitoBaseURL)
 	if err != nil {
@@ -4364,11 +4375,11 @@ func main() {
 		log.Printf("🔄 Executing REAL pipeline for Gov IDs: %v", govIDs)
 		log.Printf("📊 Pipeline stages: scrape -> upload -> process -> ingest")
 		log.Printf("⚠️  Using REAL dokito backend: %s", dokitoBaseURL)
-		
+
 		// Execute REAL pipeline
 		jobID := runner.SubmitPipelineJobForGovIDs(govIDs)
 		log.Printf("✅ Pipeline job submitted: %s", jobID)
-		
+
 		// Wait for completion and monitor progress
 		timeout := time.After(30 * time.Minute) // 30 minute timeout for full pipeline
 		ticker := time.NewTicker(10 * time.Second)
@@ -4383,9 +4394,9 @@ func main() {
 				os.Exit(1)
 			case <-ticker.C:
 				summary := runner.GetJobSummary(jobID)
-				log.Printf("📈 Pipeline Progress: Job %s - Success: %d, Failed: %d, Total: %d", 
+				log.Printf("📈 Pipeline Progress: Job %s - Success: %d, Failed: %d, Total: %d",
 					jobID, summary.Successful, summary.Failed, summary.TotalGovIDs)
-				
+
 				if summary.Successful+summary.Failed >= len(govIDs)*4 { // 4 stages per govID
 					log.Printf("✅ Pipeline completed!")
 					log.Printf("📊 Final Results: %+v", summary)
