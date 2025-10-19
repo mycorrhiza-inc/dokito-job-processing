@@ -10,6 +10,7 @@
 
   packages = with pkgs; [
     openssl
+    node2nix
   ];
 
   env = {
