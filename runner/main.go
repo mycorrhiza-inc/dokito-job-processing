@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -4251,9 +4252,159 @@ func (r *Runner) PrintStats() {
 	fmt.Printf("Runner Statistics:\n%s\n", string(jsonData))
 }
 
+// SimplifiedPipeline executes a complete nypuc -> dokito -> ingester pipeline for a list of Gov IDs
+func SimplifiedPipeline(govIDs []string, runner *Runner) error {
+	log.Printf("🚀 Starting simplified pipeline for %d Gov IDs: %v", len(govIDs), govIDs)
+
+	ctx := context.Background()
+	dokitoPaths := getDokitoPaths()
+
+	for _, govID := range govIDs {
+		log.Printf("📋 Processing Gov ID: %s", govID)
+
+		// Step 1: NYPUC Web Scraping
+		log.Printf("🔍 Step 1/3: Running NYPUC web scraper for %s", govID)
+		scrapeOutputDir := filepath.Join(runner.workDir, fmt.Sprintf("scrape-%s-%d", govID, time.Now().Unix()))
+		if err := os.MkdirAll(scrapeOutputDir, 0755); err != nil {
+			return fmt.Errorf("failed to create scrape output directory: %w", err)
+		}
+
+		// Create a basic scrape job configuration
+		scrapeConfig := ContainerConfig{
+			Image:     runner.scraperImage,
+			GovIDs:    []string{govID},
+			Mode:      "full",
+			OutputDir: scrapeOutputDir,
+		}
+
+		// Execute scraping using existing container infrastructure
+		worker := &Worker{
+			ID:           "simplified-pipeline",
+			ScraperImage: runner.scraperImage,
+			WorkDir:      runner.workDir,
+			Client:       runner.dockerClient,
+		}
+
+		if err := worker.ensureScraperContainer(); err != nil {
+			return fmt.Errorf("failed to ensure scraper container: %w", err)
+		}
+
+		if err := worker.executeContainerJob(scrapeConfig); err != nil {
+			log.Printf("❌ Scraping failed for %s: %v", govID, err)
+			continue
+		}
+
+		log.Printf("✅ Step 1/3 completed: Scraping successful for %s", govID)
+
+		// Step 2: Dokito Processing
+		log.Printf("⚙️  Step 2/3: Running Dokito processor for %s", govID)
+
+		// Create raw docket location for input
+		rawLocation := &RawDocketLocation{
+			JurInfo: JurisdictionInfo{
+				Country:      "us",
+				State:        "ny",
+				Jurisdiction: "ny_puc",
+			},
+			DocketGovId: govID,
+		}
+
+		// Upload scraped data to S3 raw location
+		rawS3Location, err := rawLocation.GenerateS3Location()
+		if err != nil {
+			log.Printf("❌ Failed to generate raw S3 location for %s: %v", govID, err)
+			continue
+		}
+
+		// Read scraped data and upload to S3
+		scrapedDataFile := filepath.Join(scrapeOutputDir, fmt.Sprintf("%s.json", govID))
+		if scrapedData, err := os.ReadFile(scrapedDataFile); err == nil {
+			var scrapedJSON interface{}
+			if err := json.Unmarshal(scrapedData, &scrapedJSON); err == nil {
+				if err := rawS3Location.UploadJsonTo(ctx, scrapedJSON); err != nil {
+					log.Printf("⚠️  Failed to upload scraped data to S3 for %s: %v", govID, err)
+				} else {
+					log.Printf("📤 Uploaded scraped data to S3 for %s", govID)
+				}
+			}
+		}
+
+		// Execute Dokito processing
+		processCmd := []string{dokitoPaths.ProcessDocketPath, govID}
+		if err := executeCommand(processCmd); err != nil {
+			log.Printf("❌ Dokito processing failed for %s: %v", govID, err)
+			continue
+		}
+
+		log.Printf("✅ Step 2/3 completed: Dokito processing successful for %s", govID)
+
+		// Step 3: Ingestion
+		log.Printf("📥 Step 3/3: Running ingester for %s", govID)
+
+		// Create processed docket location
+		processedLocation := &ProcessedDocketLocation{
+			JurInfo: JurisdictionInfo{
+				Country:      "us",
+				State:        "ny",
+				Jurisdiction: "ny_puc",
+			},
+			DocketGovId: govID,
+		}
+
+		// Generate S3 location for processed data
+		processedS3Location, err := processedLocation.GenerateS3Location()
+		if err != nil {
+			log.Printf("❌ Failed to generate processed S3 location for %s: %v", govID, err)
+			continue
+		}
+
+		// Retrieve processed data from S3
+		var processedData interface{}
+		if err := processedS3Location.RetrieveJsonFrom(ctx, &processedData); err != nil {
+			log.Printf("⚠️  Failed to retrieve processed data from S3 for %s: %v", govID, err)
+		} else {
+			log.Printf("📥 Retrieved processed data from S3 for %s", govID)
+		}
+
+		// Execute ingestion using upload binary
+		uploadCmd := []string{dokitoPaths.UploadDocketPath, govID}
+		if err := executeCommand(uploadCmd); err != nil {
+			log.Printf("❌ Ingestion failed for %s: %v", govID, err)
+			continue
+		}
+
+		log.Printf("✅ Step 3/3 completed: Ingestion successful for %s", govID)
+		log.Printf("🎉 Pipeline completed successfully for Gov ID: %s", govID)
+	}
+
+	log.Printf("🏁 Simplified pipeline completed for all %d Gov IDs", len(govIDs))
+	return nil
+}
+
+// executeCommand executes a shell command and returns any error
+func executeCommand(cmd []string) error {
+	if len(cmd) == 0 {
+		return fmt.Errorf("empty command")
+	}
+
+	log.Printf("🔧 Executing: %s", strings.Join(cmd, " "))
+
+	execCmd := exec.Command(cmd[0], cmd[1:]...)
+	output, err := execCmd.CombinedOutput()
+
+	if err != nil {
+		log.Printf("❌ Command failed: %s", string(output))
+		return fmt.Errorf("command failed: %w", err)
+	}
+
+	log.Printf("✅ Command output: %s", string(output))
+	return nil
+}
+
 func main() {
 	// Parse command-line flags
 	pipelineMode := flag.Bool("pipeline", false, "Execute full pipeline (scrape -> upload -> process -> ingest)")
+	simplePipelineMode := flag.Bool("simple-pipeline", false, "Execute simplified pipeline (nypuc -> dokito -> ingester)")
 	govIDsFlag := flag.String("govids", "", "Comma-separated list of Gov IDs to process")
 	helpFlag := flag.Bool("help", false, "Show help information")
 
@@ -4289,6 +4440,7 @@ func main() {
 		fmt.Println("  ./runner                                    # Run in daemon mode with API")
 		fmt.Println("  ./runner -pipeline -govids 25-01799        # Execute pipeline for single Gov ID")
 		fmt.Println("  ./runner -pipeline -govids 25-01799,25-01548,25-E-0365  # Execute pipeline for multiple Gov IDs")
+		fmt.Println("  ./runner -simple-pipeline -govids 25-01799 # Execute simplified nypuc->dokito->ingester pipeline")
 		fmt.Println("")
 		fmt.Println("Queue Management:")
 		fmt.Println("  ./runner -queue-add 25-01799,25-01548      # Add Gov IDs to queue")
@@ -4409,6 +4561,29 @@ func main() {
 				}
 			}
 		}
+	}
+
+	// Simplified Pipeline execution mode
+	if *simplePipelineMode {
+		if *govIDsFlag == "" {
+			log.Fatal("❌ Simplified pipeline mode requires --govids parameter")
+		}
+
+		govIDs := strings.Split(*govIDsFlag, ",")
+		for i, id := range govIDs {
+			govIDs[i] = strings.TrimSpace(id)
+		}
+
+		log.Printf("🚀 Executing simplified pipeline for Gov IDs: %v", govIDs)
+		log.Printf("📊 Pipeline stages: nypuc scraper -> dokito processor -> ingester")
+
+		// Execute simplified pipeline
+		if err := SimplifiedPipeline(govIDs, runner); err != nil {
+			log.Fatalf("❌ Simplified pipeline failed: %v", err)
+		}
+
+		log.Printf("🎉 Simplified pipeline completed successfully!")
+		return
 	}
 
 	// Queue management operations

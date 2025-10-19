@@ -278,10 +278,10 @@ func (lb *LoadBalancer) GetLoadBalanceStats() LoadBalanceStats {
 	defer lb.mu.RUnlock()
 
 	stats := LoadBalanceStats{
-		Strategy:         string(lb.strategy),
-		TotalWorkers:     len(lb.workerIDs),
+		Strategy:          string(lb.strategy),
+		TotalWorkers:      len(lb.workerIDs),
 		ActiveAssignments: len(lb.assignments),
-		WorkerLoads:      make(map[string]int),
+		WorkerLoads:       make(map[string]int),
 	}
 
 	// Copy worker loads

@@ -28,8 +28,8 @@ type ProcessQueueRequest struct {
 }
 
 type ProcessQueueResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success bool     `json:"success"`
+	Message string   `json:"message"`
 	JobIDs  []string `json:"job_ids,omitempty"`
 }
 
@@ -64,9 +64,9 @@ type LoadQueueResponse struct {
 }
 
 type QueueStatusResponse struct {
-	Success       bool              `json:"success"`
-	Queue         QueueStats        `json:"queue"`
-	LoadBalancer  LoadBalanceStats  `json:"load_balancer"`
+	Success      bool             `json:"success"`
+	Queue        QueueStats       `json:"queue"`
+	LoadBalancer LoadBalanceStats `json:"load_balancer"`
 }
 
 type HealthResponse struct {
