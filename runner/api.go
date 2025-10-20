@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 type APIServer struct {
@@ -69,6 +71,14 @@ func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// @Summary Health check endpoint
+// @Description Get the health status of the API and all configured services
+// @Tags health
+// @Accept json
+// @Produce json
+// @Success 200 {object} HealthResponse
+// @Failure 405 {object} map[string]string
+// @Router /api/health [get]
 func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -120,6 +130,17 @@ func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// @Summary Execute full pipeline
+// @Description Execute the complete data pipeline for a given government ID including scraping, processing, and uploading
+// @Tags pipeline
+// @Accept json
+// @Produce json
+// @Param request body FullPipelineRequest true "Pipeline request with government ID"
+// @Success 200 {object} FullPipelineResponse
+// @Failure 400 {object} map[string]string
+// @Failure 405 {object} map[string]string
+// @Failure 500 {object} FullPipelineResponse
+// @Router /api/pipeline/full [post]
 func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -219,6 +240,9 @@ func (s *APIServer) SetupRoutes() *http.ServeMux {
 
 	// Full pipeline endpoint
 	mux.HandleFunc("/api/pipeline/full", s.handleFullPipeline)
+
+	// Swagger documentation
+	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
 
 	return mux
 }

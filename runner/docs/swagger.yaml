@@ -1,0 +1,98 @@
+definitions:
+  main.FullPipelineRequest:
+    properties:
+      gov_id:
+        type: string
+    type: object
+  main.FullPipelineResponse:
+    properties:
+      error:
+        type: string
+      gov_id:
+        type: string
+      message:
+        type: string
+      process_count:
+        type: integer
+      scrape_count:
+        type: integer
+      scraper_type:
+        type: string
+      success:
+        type: boolean
+    type: object
+  main.HealthResponse:
+    properties:
+      services:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        type: string
+      timestamp:
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /api/health:
+    get:
+      consumes:
+      - application/json
+      description: Get the health status of the API and all configured services
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.HealthResponse'
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check endpoint
+      tags:
+      - health
+  /api/pipeline/full:
+    post:
+      consumes:
+      - application/json
+      description: Execute the complete data pipeline for a given government ID including
+        scraping, processing, and uploading
+      parameters:
+      - description: Pipeline request with government ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.FullPipelineRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.FullPipelineResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.FullPipelineResponse'
+      summary: Execute full pipeline
+      tags:
+      - pipeline
+swagger: "2.0"

@@ -7,10 +7,13 @@
 
   # Common packages available to all projects
   languages.rust.enable = true;
+  languages.go.enable = true;
 
   packages = with pkgs; [
     openssl
     node2nix
+    inputs.gomod2nix.packages.${pkgs.system}.default
+    go-swag
   ];
 
   env = {
