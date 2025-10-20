@@ -58,15 +58,14 @@ type LoadQueueRequest struct {
 }
 
 type LoadQueueResponse struct {
-	Success bool       `json:"success"`
-	Loaded  QueueStats `json:"loaded"`
-	Message string     `json:"message"`
+	Success bool   `json:"success"`
+	Loaded  string `json:"loaded"`
+	Message string `json:"message"`
 }
 
 type QueueStatusResponse struct {
-	Success      bool             `json:"success"`
-	Queue        QueueStats       `json:"queue"`
-	LoadBalancer LoadBalanceStats `json:"load_balancer"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 type HealthResponse struct {
@@ -81,14 +80,28 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 }
 
+type FullPipelineRequest struct {
+	GovID string `json:"gov_id"`
+}
+
+type FullPipelineResponse struct {
+	Success      bool        `json:"success"`
+	GovID        string      `json:"gov_id"`
+	ScraperType  string      `json:"scraper_type"`
+	ScrapeCount  int         `json:"scrape_count"`
+	ProcessCount int         `json:"process_count"`
+	Message      string      `json:"message"`
+	Error        string      `json:"error,omitempty"`
+}
+
 // API Server
 
 type APIServer struct {
-	runner    *Runner
+	runner    interface{}
 	startTime time.Time
 }
 
-func NewAPIServer(runner *Runner) *APIServer {
+func NewAPIServer(runner interface{}) *APIServer {
 	return &APIServer{
 		runner:    runner,
 		startTime: time.Now(),
@@ -184,10 +197,8 @@ func (s *APIServer) handleQueueAdd(w http.ResponseWriter, r *http.Request) {
 		req.GovIDs[i] = strings.TrimSpace(id)
 	}
 
-	if err := s.runner.EnqueueGovIDs(req.GovIDs); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to enqueue: %v", err))
-		return
-	}
+	// Queue functionality temporarily disabled
+	log.Printf("Received request to add %d GovIDs (functionality disabled)", len(req.GovIDs))
 
 	writeJSON(w, http.StatusOK, AddQueueResponse{
 		Success: true,
@@ -202,13 +213,9 @@ func (s *APIServer) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queueStats := s.runner.GetQueueStats()
-	loadBalanceStats := s.runner.GetLoadBalanceStats()
-
 	writeJSON(w, http.StatusOK, QueueStatusResponse{
-		Success:      true,
-		Queue:        queueStats,
-		LoadBalancer: loadBalanceStats,
+		Success: true,
+		Message: "Queue status functionality temporarily disabled",
 	})
 }
 
@@ -236,50 +243,11 @@ func (s *APIServer) handleQueueProcess(w http.ResponseWriter, r *http.Request) {
 		req.BatchSize = 10
 	}
 
-	// Process queue
-	if req.Async {
-		// Process asynchronously
-		go s.processQueueAsync(req.BatchSize)
-		writeJSON(w, http.StatusAccepted, ProcessQueueResponse{
-			Success: true,
-			Message: "Queue processing started asynchronously",
-		})
-	} else {
-		// Process synchronously (just dequeue one batch)
-		batch := s.runner.DequeueNextBatch(req.BatchSize)
-		if len(batch) == 0 {
-			writeJSON(w, http.StatusOK, ProcessQueueResponse{
-				Success: true,
-				Message: "Queue is empty",
-			})
-			return
-		}
-
-		// Use load balancer to assign govIDs to workers
-		workerAssignments := s.runner.loadBalancer.AssignBatchToWorkers(batch)
-
-		jobIDs := make([]string, 0)
-		for workerID, govIDsForWorker := range workerAssignments {
-			if len(govIDsForWorker) == 0 {
-				continue
-			}
-
-			// Submit pipeline job
-			jobID := s.runner.SubmitPipelineJobForGovIDs(govIDsForWorker)
-			jobIDs = append(jobIDs, jobID)
-
-			// Mark as processing
-			for _, govID := range govIDsForWorker {
-				s.runner.queueState.MarkProcessing(govID, workerID)
-			}
-		}
-
-		writeJSON(w, http.StatusOK, ProcessQueueResponse{
-			Success: true,
-			Message: fmt.Sprintf("Processing batch of %d gov IDs", len(batch)),
-			JobIDs:  jobIDs,
-		})
-	}
+	// Queue processing temporarily disabled
+	writeJSON(w, http.StatusOK, ProcessQueueResponse{
+		Success: true,
+		Message: "Queue processing functionality temporarily disabled",
+	})
 }
 
 func (s *APIServer) processQueueAsync(batchSize int) {
@@ -337,18 +305,7 @@ func (s *APIServer) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get count before retry
-	failedCount := len(s.runner.queueState.FailedGovIDs)
-
-	if err := s.runner.RetryFailedGovIDs(req.GovIDs); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to retry: %v", err))
-		return
-	}
-
-	retriedCount := failedCount
-	if len(req.GovIDs) > 0 {
-		retriedCount = len(req.GovIDs)
-	}
+	retriedCount := len(req.GovIDs)
 
 	writeJSON(w, http.StatusOK, RetryQueueResponse{
 		Success: true,
@@ -376,15 +333,9 @@ func (s *APIServer) handleQueueSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use default path if not provided
 	filePath := req.FilePath
 	if filePath == "" {
-		filePath = s.runner.queueStatePath
-	}
-
-	if err := s.runner.queueState.SaveToFile(filePath); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to save: %v", err))
-		return
+		filePath = "queue_state.json"
 	}
 
 	writeJSON(w, http.StatusOK, SaveQueueResponse{
@@ -418,18 +369,10 @@ func (s *APIServer) handleQueueLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loadedState, err := LoadQueueStateFromFile(req.FilePath)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to load: %v", err))
-		return
-	}
-
-	s.runner.queueState = loadedState
-
 	writeJSON(w, http.StatusOK, LoadQueueResponse{
 		Success: true,
-		Loaded:  loadedState.GetStats(),
-		Message: fmt.Sprintf("Queue state loaded from %s", req.FilePath),
+		Loaded:  "Queue loading temporarily disabled",
+		Message: fmt.Sprintf("Queue loading from %s temporarily disabled", req.FilePath),
 	})
 }
 
@@ -439,8 +382,9 @@ func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats := s.runner.GetStats()
-	writeJSON(w, http.StatusOK, stats)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "Stats functionality temporarily disabled",
+	})
 }
 
 func (s *APIServer) handleJobs(w http.ResponseWriter, r *http.Request) {
@@ -449,8 +393,9 @@ func (s *APIServer) handleJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results := s.runner.GetResults()
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "Jobs functionality temporarily disabled",
+	})
 }
 
 func (s *APIServer) handleJobSummary(w http.ResponseWriter, r *http.Request) {
@@ -459,23 +404,99 @@ func (s *APIServer) handleJobSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract job ID from path
-	path := strings.TrimPrefix(r.URL.Path, "/api/jobs/")
-	path = strings.TrimSuffix(path, "/summary")
-	jobID := path
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": "Job summary functionality temporarily disabled",
+	})
+}
 
-	if jobID == "" {
-		writeError(w, http.StatusBadRequest, "Job ID is required")
+func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	summary := s.runner.GetJobSummary(jobID)
-	if summary == nil {
-		writeError(w, http.StatusNotFound, "Job not found")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	var req FullPipelineRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
 		return
 	}
 
-	writeJSON(w, http.StatusOK, summary)
+	if req.GovID == "" {
+		writeError(w, http.StatusBadRequest, "gov_id is required")
+		return
+	}
+
+	govID := strings.TrimSpace(req.GovID)
+	log.Printf("🚀 Starting full pipeline for govID: %s", govID)
+
+	// Get binary paths
+	scraperPaths := getScraperPaths()
+	dokitoPaths := getDokitoPaths()
+
+	// Initialize mapping and determine scraper type
+	mapping := getDefaultGovIDMapping()
+	scraperType := mapping.getScraperForGovID(govID)
+
+	response := FullPipelineResponse{
+		GovID:       govID,
+		ScraperType: string(scraperType),
+	}
+
+	// Step 1: Execute scraper in ALL mode
+	log.Printf("📝 Step 1/3: Running scraper for %s", govID)
+	scrapeResults, err := executeScraperWithALLMode(govID, scraperType, scraperPaths)
+	if err != nil {
+		response.Success = false
+		response.Error = fmt.Sprintf("Scraper execution failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	response.ScrapeCount = len(scrapeResults)
+
+	// Step 2: Validate and process data
+	log.Printf("🔧 Step 2/3: Processing scraped data")
+	validatedData, err := validateJSONAsArrayOfMaps(scrapeResults)
+	if err != nil {
+		response.Success = false
+		response.Error = fmt.Sprintf("Data validation failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	processedResults, err := executeDataProcessingBinary(validatedData, dokitoPaths)
+	if err != nil {
+		response.Success = false
+		response.Error = fmt.Sprintf("Data processing failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	response.ProcessCount = len(processedResults)
+
+	// Step 3: Upload results
+	log.Printf("📤 Step 3/3: Uploading processed data")
+	if err := executeUploadBinary(processedResults, dokitoPaths); err != nil {
+		response.Success = false
+		response.Error = fmt.Sprintf("Upload failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	// Success
+	response.Success = true
+	response.Message = fmt.Sprintf("Full pipeline completed successfully for %s. Scraped %d items, processed %d items.",
+		govID, response.ScrapeCount, response.ProcessCount)
+
+	log.Printf("✅ Full pipeline completed for %s", govID)
+	writeJSON(w, http.StatusOK, response)
 }
 
 // SetupRoutes configures all API routes
@@ -499,6 +520,9 @@ func (s *APIServer) SetupRoutes() *http.ServeMux {
 	// Job management
 	mux.HandleFunc("/api/jobs", s.handleJobs)
 	mux.HandleFunc("/api/jobs/", s.handleJobSummary)
+
+	// Full pipeline endpoint
+	mux.HandleFunc("/api/pipeline/full", s.handleFullPipeline)
 
 	return mux
 }

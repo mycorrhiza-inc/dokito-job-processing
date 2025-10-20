@@ -33,6 +33,12 @@ type DokitoBinaryPaths struct {
 	DownloadAttachmentPath string
 }
 
+type ScraperBinaryPaths struct {
+	NYPUCPath    string
+	COPUCPath    string
+	UtahCoalPath string
+}
+
 func getDokitoPaths() DokitoBinaryPaths {
 	// Get binary paths from environment variables - required
 	processDocketsBinaryPath := os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH")
@@ -52,6 +58,29 @@ func getDokitoPaths() DokitoBinaryPaths {
 		ProcessDocketPath:      processDocketsBinaryPath,
 		UploadDocketPath:       uploadDocketsBinaryPath,
 		DownloadAttachmentPath: downloadAttachmentsBinaryPath,
+	}
+}
+
+func getScraperPaths() ScraperBinaryPaths {
+	// Get scraper binary paths from environment variables - required
+	nypucPath := os.Getenv("OPENSCRAPER_PATH_NYPUC")
+	copucPath := os.Getenv("OPENSCRAPER_PATH_COPUC")
+	utahCoalPath := os.Getenv("OPENSCRAPER_PATH_UTAHCOAL")
+
+	if nypucPath == "" {
+		log.Fatal("❌ OPENSCRAPER_PATH_NYPUC environment variable is required")
+	}
+	if copucPath == "" {
+		log.Fatal("❌ OPENSCRAPER_PATH_COPUC environment variable is required")
+	}
+	if utahCoalPath == "" {
+		log.Fatal("❌ OPENSCRAPER_PATH_UTAHCOAL environment variable is required")
+	}
+
+	return ScraperBinaryPaths{
+		NYPUCPath:    nypucPath,
+		COPUCPath:    copucPath,
+		UtahCoalPath: utahCoalPath,
 	}
 }
 
@@ -102,6 +131,58 @@ const (
 	DokitoModeCaseSubmit    DokitoMode = "case-submit"
 	DokitoModeReprocess     DokitoMode = "reprocess"
 )
+
+// ScraperType represents different scraper types
+type ScraperType string
+
+const (
+	ScraperTypeNYPUC    ScraperType = "nypuc"
+	ScraperTypeCOPUC    ScraperType = "copuc"
+	ScraperTypeUtahCoal ScraperType = "utahcoal"
+)
+
+// GovIDScraperMapping holds configurable mappings from GovID to scraper
+type GovIDScraperMapping struct {
+	// Direct mapping for specific GovIDs
+	DirectMappings map[string]ScraperType
+	// Default scraper when no mapping found
+	DefaultScraper ScraperType
+}
+
+// getDefaultGovIDMapping returns the default mapping configuration
+func getDefaultGovIDMapping() GovIDScraperMapping {
+	return GovIDScraperMapping{
+		DirectMappings: make(map[string]ScraperType),
+		DefaultScraper: ScraperTypeNYPUC, // Default to NYPUC for backwards compatibility
+	}
+}
+
+// getScraperForGovID determines which scraper to use based on configurable mapping
+func (mapping *GovIDScraperMapping) getScraperForGovID(govID string) ScraperType {
+	if scraperType, exists := mapping.DirectMappings[govID]; exists {
+		return scraperType
+	}
+	return mapping.DefaultScraper
+}
+
+// addGovIDMapping adds or updates a mapping for a specific GovID
+func (mapping *GovIDScraperMapping) addGovIDMapping(govID string, scraperType ScraperType) {
+	mapping.DirectMappings[govID] = scraperType
+}
+
+// getScraperBinaryPath returns the binary path for a scraper type
+func getScraperBinaryPath(scraperType ScraperType, scraperPaths ScraperBinaryPaths) string {
+	switch scraperType {
+	case ScraperTypeNYPUC:
+		return scraperPaths.NYPUCPath
+	case ScraperTypeCOPUC:
+		return scraperPaths.COPUCPath
+	case ScraperTypeUtahCoal:
+		return scraperPaths.UtahCoalPath
+	default:
+		return scraperPaths.NYPUCPath
+	}
+}
 
 // BaseJob represents common job fields
 type BaseJob struct {
@@ -4401,313 +4482,173 @@ func executeCommand(cmd []string) error {
 	return nil
 }
 
+// executeScraperWithALLMode executes a scraper binary in ALL mode for a specific govID
+func executeScraperWithALLMode(govID string, scraperType ScraperType, scraperPaths ScraperBinaryPaths) ([]map[string]interface{}, error) {
+	binaryPath := getScraperBinaryPath(scraperType, scraperPaths)
+
+	log.Printf("🎭 Executing %s scraper for govID: %s", scraperType, govID)
+
+	// Prepare command: binary_path govID ALL
+	cmd := exec.Command(binaryPath, govID, "ALL")
+
+	// Execute command and capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("❌ Scraper failed for %s: %s", govID, string(output))
+		return nil, fmt.Errorf("scraper execution failed for %s: %w", govID, err)
+	}
+
+	log.Printf("✅ Scraper completed for %s", govID)
+	log.Printf("📄 Raw output: %s", string(output))
+
+	// Parse JSON output
+	var results []map[string]interface{}
+	if err := json.Unmarshal(output, &results); err != nil {
+		return nil, fmt.Errorf("failed to parse scraper JSON output for %s: %w", govID, err)
+	}
+
+	log.Printf("📊 Parsed %d results from scraper", len(results))
+	return results, nil
+}
+
+// validateJSONAsArrayOfMaps validates that data can be serialized/deserialized as []map[string]interface{}
+func validateJSONAsArrayOfMaps(data interface{}) ([]map[string]interface{}, error) {
+	// First serialize to JSON
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal data to JSON: %w", err)
+	}
+
+	// Then deserialize back to []map[string]interface{}
+	var result []map[string]interface{}
+	if err := json.Unmarshal(jsonBytes, &result); err != nil {
+		return nil, fmt.Errorf("data does not deserialize to []map[string]interface{}: %w", err)
+	}
+
+	return result, nil
+}
+
+// executeDataProcessingBinary executes the dokito data processing binary with JSON input
+func executeDataProcessingBinary(inputData []map[string]interface{}, dokitoPaths DokitoBinaryPaths) ([]map[string]interface{}, error) {
+	log.Printf("🔧 Executing data processing binary")
+
+	// Serialize input data to JSON
+	inputJSON, err := json.Marshal(inputData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal input data: %w", err)
+	}
+
+	// Execute the processing binary with JSON input via stdin
+	cmd := exec.Command(dokitoPaths.ProcessDocketPath)
+	cmd.Stdin = bytes.NewReader(inputJSON)
+
+	// Capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("❌ Data processing failed: %s", string(output))
+		return nil, fmt.Errorf("data processing binary execution failed: %w", err)
+	}
+
+	log.Printf("✅ Data processing completed")
+	log.Printf("📄 Processing output: %s", string(output))
+
+	// Parse and validate output
+	var processedResults []map[string]interface{}
+	if err := json.Unmarshal(output, &processedResults); err != nil {
+		return nil, fmt.Errorf("failed to parse processing binary JSON output: %w", err)
+	}
+
+	log.Printf("📊 Processed %d results", len(processedResults))
+	return processedResults, nil
+}
+
+// executeUploadBinary executes the dokito upload binary with JSON input
+func executeUploadBinary(inputData []map[string]interface{}, dokitoPaths DokitoBinaryPaths) error {
+	log.Printf("📤 Executing upload binary")
+
+	// Serialize input data to JSON
+	inputJSON, err := json.Marshal(inputData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal input data for upload: %w", err)
+	}
+
+	// Execute the upload binary with JSON input via stdin
+	cmd := exec.Command(dokitoPaths.UploadDocketPath)
+	cmd.Stdin = bytes.NewReader(inputJSON)
+
+	// Capture output
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("❌ Upload failed: %s", string(output))
+		return fmt.Errorf("upload binary execution failed: %w", err)
+	}
+
+	log.Printf("✅ Upload completed")
+	log.Printf("📄 Upload output: %s", string(output))
+	return nil
+}
+
 func main() {
 	// Parse command-line flags
-	pipelineMode := flag.Bool("pipeline", false, "Execute full pipeline (scrape -> upload -> process -> ingest)")
-	simplePipelineMode := flag.Bool("simple-pipeline", false, "Execute simplified pipeline (nypuc -> dokito -> ingester)")
-	govIDsFlag := flag.String("govids", "", "Comma-separated list of Gov IDs to process")
 	helpFlag := flag.Bool("help", false, "Show help information")
-
-	// Queue management flags
-	queueAddFlag := flag.String("queue-add", "", "Add comma-separated Gov IDs to the queue")
-	queueStatusFlag := flag.Bool("queue-status", false, "Show current queue status")
-	queueLoadFlag := flag.String("queue-load", "", "Load queue state from file")
-	queueSaveFlag := flag.String("queue-save", "", "Save queue state to file")
-	queueRetryFlag := flag.Bool("queue-retry", false, "Retry all failed Gov IDs in queue")
-	queueProcessFlag := flag.Bool("queue-process", false, "Start processing Gov IDs from the queue")
-	queueBatchSize := flag.Int("queue-batch-size", 6, "Number of Gov IDs to process in each batch")
-
-	// API server flags
-	apiPort := flag.Int("api-port", 8080, "HTTP API server port")
-	noAPI := flag.Bool("no-api", false, "Disable HTTP API server")
-
-	// Auto-processing flags
-	noAutoProcess := flag.Bool("no-auto-process", false, "Disable automatic queue processing in daemon mode")
-	autoBatchSize := flag.Int("auto-batch-size", 5, "Batch size for automatic queue processing")
-	autoPollInterval := flag.Duration("auto-poll-interval", 5*time.Second, "Queue polling interval for auto-processing")
-
-	// Caselist polling flags
-	enableCaselistPolling := flag.Bool("enable-caselist-polling", false, "Enable automatic caselist polling")
-	caselistFirstRunOnly := flag.Bool("caselist-first-run-only", true, "Run caselist poll only once")
-	caselistPollInterval := flag.Duration("caselist-poll-interval", 1*time.Hour, "Caselist polling interval")
+	apiPort := flag.String("port", "8080", "API server port")
 
 	flag.Parse()
 
 	if *helpFlag {
-		fmt.Println("JobRunner - End-to-End Document Processing Pipeline")
+		fmt.Println("JobRunner - Full Pipeline API Server")
 		fmt.Println("")
 		fmt.Println("Usage:")
-		fmt.Println("  ./runner                                    # Run in daemon mode with API")
-		fmt.Println("  ./runner -pipeline -govids 25-01799        # Execute pipeline for single Gov ID")
-		fmt.Println("  ./runner -pipeline -govids 25-01799,25-01548,25-E-0365  # Execute pipeline for multiple Gov IDs")
-		fmt.Println("  ./runner -simple-pipeline -govids 25-01799 # Execute simplified nypuc->dokito->ingester pipeline")
+		fmt.Println("  ./runner -port 8080                        # Start API server on port 8080")
 		fmt.Println("")
-		fmt.Println("Queue Management:")
-		fmt.Println("  ./runner -queue-add 25-01799,25-01548      # Add Gov IDs to queue")
-		fmt.Println("  ./runner -queue-status                      # Show queue status")
-		fmt.Println("  ./runner -queue-process                     # Process Gov IDs from queue")
-		fmt.Println("  ./runner -queue-process -queue-batch-size 6  # Process queue in batches of 6")
-		fmt.Println("  ./runner -queue-retry                       # Retry all failed Gov IDs")
-		fmt.Println("  ./runner -queue-save queue.json             # Save queue state to file")
-		fmt.Println("  ./runner -queue-load queue.json             # Load queue state from file")
+		fmt.Println("API Endpoints:")
+		fmt.Println("  GET  /api/health                           # Health check")
+		fmt.Println("  POST /api/pipeline/full                    # Run full pipeline for a govID")
+		fmt.Println("    Example: curl -X POST http://localhost:8080/api/pipeline/full \\")
+		fmt.Println("             -H 'Content-Type: application/json' \\")
+		fmt.Println("             -d '{\"gov_id\": \"14-M-0094\"}'")
 		fmt.Println("")
-		fmt.Println("HTTP API Server:")
-		fmt.Println("  ./runner -api-port 8080                     # Start with API on port 8080 (default)")
-		fmt.Println("  ./runner -no-api                            # Run without API server")
-		fmt.Println("  curl http://localhost:8080/api/health       # Check API health")
-		fmt.Println("  curl http://localhost:8080/api/queue/status # Get queue status")
-		fmt.Println("  curl -X POST http://localhost:8080/api/queue/add \\")
-		fmt.Println("    -d '{\"gov_ids\": [\"25-01799\"]}'          # Add govIDs via API")
-		fmt.Println("")
-		fmt.Println("Pipeline stages: scrape -> upload -> process -> ingest")
-		fmt.Println("Uses REAL dokito backend (no mocks)")
+		fmt.Println("Environment Variables Required:")
+		fmt.Println("  OPENSCRAPER_PATH_NYPUC                     # Path to NY PUC scraper binary")
+		fmt.Println("  OPENSCRAPER_PATH_COPUC                     # Path to CO PUC scraper binary")
+		fmt.Println("  OPENSCRAPER_PATH_UTAHCOAL                  # Path to Utah Coal scraper binary")
+		fmt.Println("  DOKITO_PROCESS_DOCKETS_BINARY_PATH         # Path to data processing binary")
+		fmt.Println("  DOKITO_UPLOAD_DOCKETS_BINARY_PATH          # Path to upload binary")
+		fmt.Println("  DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH    # Path to download binary")
 		return
 	}
 
-	// Read configuration from environment variables or use defaults
-	workerCount := 5
-	scraperImage := os.Getenv("SCRAPER_IMAGE")
-	if scraperImage == "" {
-		scraperImage = "jobrunner-worker:latest"
+	// Verify environment variables are set
+	log.Println("🔍 Checking required environment variables...")
+	scraperPaths := getScraperPaths()
+	dokitoPaths := getDokitoPaths()
+	log.Printf("✅ Environment variables validated")
+	log.Printf("📍 Scraper paths: NYPUC=%s, COPUC=%s, UtahCoal=%s",
+		scraperPaths.NYPUCPath, scraperPaths.COPUCPath, scraperPaths.UtahCoalPath)
+	log.Printf("📍 Dokito paths: Process=%s, Upload=%s",
+		dokitoPaths.ProcessDocketPath, dokitoPaths.UploadDocketPath)
+
+	// Create a minimal runner for the API server
+	runner := &struct{}{} // Empty struct for now since we don't need the complex runner
+
+	// Create API server
+	apiServer := NewAPIServer(runner)
+
+	// Setup routes
+	mux := apiServer.SetupRoutes()
+
+	// Apply middleware
+	handler := apiServer.loggingMiddleware(apiServer.corsMiddleware(mux))
+
+	// Start server
+	serverAddr := ":" + *apiPort
+	log.Printf("🚀 Starting API server on %s", serverAddr)
+	log.Printf("📋 Endpoints available:")
+	log.Printf("   GET  /api/health")
+	log.Printf("   POST /api/pipeline/full")
+	log.Printf("💡 Example: curl -X POST http://localhost:%s/api/pipeline/full -H 'Content-Type: application/json' -d '{\"gov_id\": \"14-M-0094\"}'", *apiPort)
+
+	if err := http.ListenAndServe(serverAddr, handler); err != nil {
+		log.Fatalf("❌ Server failed: %v", err)
 	}
-
-	workDir := os.Getenv("WORK_DIR")
-	if workDir == "" {
-		workDir = "./output"
-	}
-
-	// Convert to absolute path for Docker mount compatibility
-	absWorkDir, err := filepath.Abs(workDir)
-	if err != nil {
-		log.Fatalf("Failed to convert work directory to absolute path: %v", err)
-	}
-	workDir = absWorkDir
-
-	// ALWAYS use REAL dokito backend - NO MOCKS
-	dokitoBaseURL := os.Getenv("DOKITO_BACKEND_URL")
-	if dokitoBaseURL == "" {
-		dokitoBaseURL = "http://localhost:8123"
-	}
-
-	// Create runner
-	runner, err := NewRunner(workerCount, scraperImage, workDir, dokitoBaseURL)
-	if err != nil {
-		log.Fatalf("Failed to create runner: %v", err)
-	}
-	defer runner.Stop()
-
-	// Disable API if requested
-	if *noAPI {
-		runner.apiEnabled = false
-	}
-
-	// Apply auto-processing configuration
-	if *noAutoProcess {
-		runner.autoProcessQueue = false
-	}
-	runner.queueBatchSize = *autoBatchSize
-	runner.queuePollInterval = *autoPollInterval
-
-	log.Printf("🚀 JobRunner started with %d workers", workerCount)
-	log.Printf("📁 Work directory: %s", workDir)
-	log.Printf("🐳 Scraper image: %s", scraperImage)
-	log.Printf("🔗 Dokito backend: %s (REAL SERVER)", dokitoBaseURL)
-
-	// Pipeline execution mode
-	if *pipelineMode {
-		if *govIDsFlag == "" {
-			log.Fatal("❌ Pipeline mode requires --govids parameter")
-		}
-
-		govIDs := strings.Split(*govIDsFlag, ",")
-		for i, id := range govIDs {
-			govIDs[i] = strings.TrimSpace(id)
-		}
-
-		log.Printf("🔄 Executing REAL pipeline for Gov IDs: %v", govIDs)
-		log.Printf("📊 Pipeline stages: scrape -> upload -> process -> ingest")
-		log.Printf("⚠️  Using REAL dokito backend: %s", dokitoBaseURL)
-
-		// Execute REAL pipeline
-		jobID := runner.SubmitPipelineJobForGovIDs(govIDs)
-		log.Printf("✅ Pipeline job submitted: %s", jobID)
-
-		// Wait for completion and monitor progress
-		timeout := time.After(30 * time.Minute) // 30 minute timeout for full pipeline
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-timeout:
-				log.Printf("❌ Pipeline timed out after 30 minutes")
-				summary := runner.GetJobSummary(jobID)
-				log.Printf("📊 Final Summary: %+v", summary)
-				os.Exit(1)
-			case <-ticker.C:
-				summary := runner.GetJobSummary(jobID)
-				log.Printf("📈 Pipeline Progress: Job %s - Success: %d, Failed: %d, Total: %d",
-					jobID, summary.Successful, summary.Failed, summary.TotalGovIDs)
-
-				if summary.Successful+summary.Failed >= len(govIDs)*4 { // 4 stages per govID
-					log.Printf("✅ Pipeline completed!")
-					log.Printf("📊 Final Results: %+v", summary)
-					if summary.Failed > 0 {
-						log.Printf("⚠️  Some stages failed - check logs")
-						os.Exit(1)
-					}
-					log.Printf("🎉 All pipeline stages completed successfully!")
-					return
-				}
-			}
-		}
-	}
-
-	// Simplified Pipeline execution mode
-	if *simplePipelineMode {
-		if *govIDsFlag == "" {
-			log.Fatal("❌ Simplified pipeline mode requires --govids parameter")
-		}
-
-		govIDs := strings.Split(*govIDsFlag, ",")
-		for i, id := range govIDs {
-			govIDs[i] = strings.TrimSpace(id)
-		}
-
-		log.Printf("🚀 Executing simplified pipeline for Gov IDs: %v", govIDs)
-		log.Printf("📊 Pipeline stages: nypuc scraper -> dokito processor -> ingester")
-
-		// Execute simplified pipeline
-		if err := SimplifiedPipeline(govIDs, runner); err != nil {
-			log.Fatalf("❌ Simplified pipeline failed: %v", err)
-		}
-
-		log.Printf("🎉 Simplified pipeline completed successfully!")
-		return
-	}
-
-	// Queue management operations
-	if *queueLoadFlag != "" {
-		log.Printf("📂 Loading queue state from %s", *queueLoadFlag)
-		loadedState, err := LoadQueueStateFromFile(*queueLoadFlag)
-		if err != nil {
-			log.Fatalf("❌ Failed to load queue state: %v", err)
-		}
-		runner.queueState = loadedState
-		log.Printf("✅ Queue state loaded successfully")
-		runner.PrintQueueStats()
-	}
-
-	if *queueAddFlag != "" {
-		govIDs := strings.Split(*queueAddFlag, ",")
-		for i, id := range govIDs {
-			govIDs[i] = strings.TrimSpace(id)
-		}
-
-		log.Printf("📥 Adding %d Gov IDs to queue", len(govIDs))
-		if err := runner.EnqueueGovIDs(govIDs); err != nil {
-			log.Fatalf("❌ Failed to enqueue Gov IDs: %v", err)
-		}
-		runner.PrintQueueStats()
-
-		// If no process flag, exit after adding
-		if !*queueProcessFlag {
-			return
-		}
-	}
-
-	if *queueRetryFlag {
-		log.Printf("🔄 Retrying all failed Gov IDs")
-		if err := runner.RetryFailedGovIDs([]string{}); err != nil {
-			log.Fatalf("❌ Failed to retry Gov IDs: %v", err)
-		}
-		runner.PrintQueueStats()
-	}
-
-	if *queueStatusFlag {
-		log.Printf("📊 Queue Status:")
-		runner.PrintQueueStats()
-		runner.PrintLoadBalanceStats()
-		return
-	}
-
-	if *queueSaveFlag != "" {
-		log.Printf("💾 Saving queue state to %s", *queueSaveFlag)
-		if err := runner.queueState.SaveToFile(*queueSaveFlag); err != nil {
-			log.Fatalf("❌ Failed to save queue state: %v", err)
-		}
-		log.Printf("✅ Queue state saved successfully")
-		return
-	}
-
-	if *queueProcessFlag {
-		log.Printf("🔄 Processing Gov IDs from queue")
-		log.Printf("📦 Batch size: %d", *queueBatchSize)
-
-		// Process queue in batches
-		for !runner.queueState.IsEmpty() {
-			batch := runner.DequeueNextBatch(*queueBatchSize)
-			if len(batch) == 0 {
-				break
-			}
-
-			log.Printf("📊 Processing batch of %d Gov IDs: %v", len(batch), batch)
-
-			// Submit batch in sub-batches of 5 (will be picked up by next idle worker)
-			subBatchSize := 5
-			for i := 0; i < len(batch); i += subBatchSize {
-				end := i + subBatchSize
-				if end > len(batch) {
-					end = len(batch)
-				}
-				subBatch := batch[i:end]
-
-				// Create pipeline job for sub-batch
-				jobID := runner.SubmitPipelineJobForGovIDs(subBatch)
-
-				// Mark all govIDs in sub-batch as processing
-				for _, govID := range subBatch {
-					runner.queueState.MarkProcessing(govID, "shared-queue")
-				}
-
-				log.Printf("📋 Created pipeline job %s for %d govIDs: %v", jobID, len(subBatch), subBatch)
-			}
-
-			// No sleep - jobs are submitted to the queue and workers will process them continuously
-			// Show progress
-			runner.PrintQueueStats()
-		}
-
-		log.Printf("✅ Queue processing complete!")
-		runner.PrintQueueStats()
-		return
-	}
-
-	// Start API server in daemon mode
-	if runner.apiEnabled {
-		if err := runner.StartAPIServer(*apiPort); err != nil {
-			log.Fatalf("Failed to start API server: %v", err)
-		}
-	}
-
-	// Start automatic queue processor in daemon mode
-	runner.startQueueWorker()
-
-	// Start caselist poller if enabled
-	if *enableCaselistPolling {
-		runner.startCaselistPoller(*caselistPollInterval, *caselistFirstRunOnly)
-		if *caselistFirstRunOnly {
-			log.Printf("🔍 Caselist polling: one-time run")
-		} else {
-			log.Printf("🔍 Caselist polling enabled (interval: %v)", *caselistPollInterval)
-		}
-	}
-
-	// Daemon mode - keep runner alive
-	log.Println("✅ Runner ready to accept jobs (daemon mode)")
-	if runner.apiEnabled {
-		log.Printf("💡 Use HTTP API at http://localhost:%d/api/", *apiPort)
-		log.Printf("💡 Try: curl http://localhost:%d/api/health", *apiPort)
-	}
-	select {}
 }

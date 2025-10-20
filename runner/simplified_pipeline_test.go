@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"os"
 	"testing"
-	"time"
 )
 
 func TestSimplifiedPipelineFunction(t *testing.T) {
@@ -49,8 +47,8 @@ func TestExecuteCommand(t *testing.T) {
 func TestDokitoPaths(t *testing.T) {
 	// Set required environment variables for testing
 	originalEnvs := map[string]string{
-		"DOKITO_PROCESS_DOCKETS_BINARY_PATH":     os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH"),
-		"DOKITO_UPLOAD_DOCKETS_BINARY_PATH":      os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH"),
+		"DOKITO_PROCESS_DOCKETS_BINARY_PATH":      os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH"),
+		"DOKITO_UPLOAD_DOCKETS_BINARY_PATH":       os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH"),
 		"DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH": os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"),
 	}
 
@@ -84,3 +82,4 @@ func TestDokitoPaths(t *testing.T) {
 
 	t.Log("getDokitoPaths function test passed")
 }
+
