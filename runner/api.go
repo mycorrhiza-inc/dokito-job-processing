@@ -243,12 +243,9 @@ func (s *APIServer) SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/pipeline/full", s.handleFullPipeline)
 
 	// Swagger documentation
-	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
-
-	// Serve swagger.json as doc.json for Swagger UI
-	mux.HandleFunc("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "./docs/swagger.json")
-	})
+	mux.Handle("/swagger/", httpSwagger.Handler(
+		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+	))
 
 	return mux
 }
