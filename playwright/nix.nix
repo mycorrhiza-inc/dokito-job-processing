@@ -28,9 +28,9 @@ let
 
   # Define all available scrapers
   scrapers = {
-    ny-puc = "playwright/ny_puc_scraper.spec.ts";
-    co-puc = "playwright/co_puc_scraper.copied-spec.ts";
-    utah-coal = "playwright/utah_coal_grand_scraper.spec.ts";
+    ny-puc = "ny_puc_scraper.spec.ts";
+    co-puc = "co_puc_scraper.copied-spec.ts";
+    utah-coal = "utah_coal_grand_scraper.spec.ts";
   };
 
 in {

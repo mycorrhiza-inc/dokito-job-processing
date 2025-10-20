@@ -43,7 +43,7 @@
             };
           };
 
-          # Create a wrapper that sets up environment variables
+          # Create a wrapper that sets up environment variables for the server
           dokitoComplete = pkgs.writeShellScriptBin "dokito-complete" ''
             set -euo pipefail
 
@@ -70,11 +70,30 @@
             exec "${goServer}/bin/runner" "$@"
           '';
 
+          # Create a CLI wrapper that sets up environment variables and runs in CLI mode
+          dokitoCLI = pkgs.writeShellScriptBin "dokito-cli" ''
+            set -euo pipefail
+
+            # Set scraper binary paths (these point to the app programs)
+            export OPENSCRAPER_PATH_NYPUC="${playwrightModule.apps.ny-puc.program}"
+            export OPENSCRAPER_PATH_COPUC="${playwrightModule.apps.co-puc.program}"
+            export OPENSCRAPER_PATH_UTAHCOAL="${playwrightModule.apps.utah-coal.program}"
+
+            # Set dokito binary paths
+            export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
+            export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
+            export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
+
+            # Execute the CLI
+            exec "${goServer}/bin/runner" "$@"
+          '';
+
         in {
           # Packages from both modules plus server
           packages = {
             default = dokitoComplete;
             dokito-complete = dokitoComplete;
+            dokito-cli = dokitoCLI;
             go-server = goServer;
           } // playwrightModule.packages // rustModule.packages;
 
@@ -87,6 +106,10 @@
             server = {
               type = "app";
               program = "${dokitoComplete}/bin/dokito-complete";
+            };
+            cli = {
+              type = "app";
+              program = "${dokitoCLI}/bin/dokito-cli";
             };
           } // playwrightModule.apps // rustModule.apps;
         };
