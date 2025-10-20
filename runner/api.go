@@ -10,74 +10,14 @@ import (
 	"time"
 )
 
-// API Request/Response types
-
-type AddQueueRequest struct {
-	GovIDs []string `json:"gov_ids"`
-}
-
-type AddQueueResponse struct {
-	Success bool   `json:"success"`
-	Added   int    `json:"added"`
-	Message string `json:"message"`
-}
-
-type ProcessQueueRequest struct {
-	BatchSize int  `json:"batch_size"`
-	Async     bool `json:"async"`
-}
-
-type ProcessQueueResponse struct {
-	Success bool     `json:"success"`
-	Message string   `json:"message"`
-	JobIDs  []string `json:"job_ids,omitempty"`
-}
-
-type RetryQueueRequest struct {
-	GovIDs []string `json:"gov_ids"`
-}
-
-type RetryQueueResponse struct {
-	Success bool   `json:"success"`
-	Retried int    `json:"retried"`
-	Message string `json:"message"`
-}
-
-type SaveQueueRequest struct {
-	FilePath string `json:"file_path"`
-}
-
-type SaveQueueResponse struct {
-	Success  bool   `json:"success"`
-	FilePath string `json:"file_path"`
-	Message  string `json:"message"`
-}
-
-type LoadQueueRequest struct {
-	FilePath string `json:"file_path"`
-}
-
-type LoadQueueResponse struct {
-	Success bool   `json:"success"`
-	Loaded  string `json:"loaded"`
-	Message string `json:"message"`
-}
-
-type QueueStatusResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+type APIServer struct {
+	runner interface{}
 }
 
 type HealthResponse struct {
-	Status  string    `json:"status"`
-	Uptime  string    `json:"uptime"`
-	Version string    `json:"version"`
-	Time    time.Time `json:"time"`
-}
-
-type ErrorResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error"`
+	Status    string            `json:"status"`
+	Timestamp string            `json:"timestamp"`
+	Services  map[string]string `json:"services"`
 }
 
 type FullPipelineRequest struct {
@@ -85,45 +25,40 @@ type FullPipelineRequest struct {
 }
 
 type FullPipelineResponse struct {
-	Success      bool        `json:"success"`
-	GovID        string      `json:"gov_id"`
-	ScraperType  string      `json:"scraper_type"`
-	ScrapeCount  int         `json:"scrape_count"`
-	ProcessCount int         `json:"process_count"`
-	Message      string      `json:"message"`
-	Error        string      `json:"error,omitempty"`
+	Success      bool   `json:"success"`
+	GovID        string `json:"gov_id"`
+	ScraperType  string `json:"scraper_type"`
+	ScrapeCount  int    `json:"scrape_count"`
+	ProcessCount int    `json:"process_count"`
+	Message      string `json:"message"`
+	Error        string `json:"error,omitempty"`
 }
 
-// API Server
-
-type APIServer struct {
-	runner    interface{}
-	startTime time.Time
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
 }
 
-func NewAPIServer(runner interface{}) *APIServer {
-	return &APIServer{
-		runner:    runner,
-		startTime: time.Now(),
-	}
+func writeError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
-
-// Middleware
 
 func (s *APIServer) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		log.Printf("API Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		next.ServeHTTP(w, r)
-		log.Printf("API Response: %s %s completed in %v", r.Method, r.URL.Path, time.Since(start))
+		log.Printf("%s %s %v", r.Method, r.URL.Path, time.Since(start))
 	})
 }
 
 func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
@@ -134,279 +69,55 @@ func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// Helper functions
-
-func writeJSON(w http.ResponseWriter, statusCode int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("Error encoding JSON response: %v", err)
-	}
-}
-
-func writeError(w http.ResponseWriter, statusCode int, message string) {
-	writeJSON(w, statusCode, ErrorResponse{
-		Success: false,
-		Error:   message,
-	})
-}
-
-// HTTP Handlers
-
 func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	uptime := time.Since(s.startTime)
-	writeJSON(w, http.StatusOK, HealthResponse{
-		Status:  "healthy",
-		Uptime:  uptime.String(),
-		Version: "1.0.0",
-		Time:    time.Now(),
-	})
-}
+	// Check scraper paths
+	scraperPaths := getScraperPaths()
+	dokitoPaths := getDokitoPaths()
 
-func (s *APIServer) handleQueueAdd(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
+	services := make(map[string]string)
+
+	if scraperPaths.NYPUCPath != "" {
+		services["nypuc_scraper"] = "configured"
+	} else {
+		services["nypuc_scraper"] = "not_configured"
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	var req AddQueueRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
-		return
+	if scraperPaths.COPUCPath != "" {
+		services["copuc_scraper"] = "configured"
+	} else {
+		services["copuc_scraper"] = "not_configured"
 	}
 
-	if len(req.GovIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "No gov_ids provided")
-		return
+	if scraperPaths.UtahCoalPath != "" {
+		services["utahcoal_scraper"] = "configured"
+	} else {
+		services["utahcoal_scraper"] = "not_configured"
 	}
 
-	// Trim whitespace from govIDs
-	for i, id := range req.GovIDs {
-		req.GovIDs[i] = strings.TrimSpace(id)
+	if dokitoPaths.ProcessDocketsPath != "" {
+		services["process_dockets"] = "configured"
+	} else {
+		services["process_dockets"] = "not_configured"
 	}
 
-	// Queue functionality temporarily disabled
-	log.Printf("Received request to add %d GovIDs (functionality disabled)", len(req.GovIDs))
-
-	writeJSON(w, http.StatusOK, AddQueueResponse{
-		Success: true,
-		Added:   len(req.GovIDs),
-		Message: fmt.Sprintf("Successfully added %d gov IDs to queue", len(req.GovIDs)),
-	})
-}
-
-func (s *APIServer) handleQueueStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
+	if dokitoPaths.UploadDocketsPath != "" {
+		services["upload_dockets"] = "configured"
+	} else {
+		services["upload_dockets"] = "not_configured"
 	}
 
-	writeJSON(w, http.StatusOK, QueueStatusResponse{
-		Success: true,
-		Message: "Queue status functionality temporarily disabled",
-	})
-}
-
-func (s *APIServer) handleQueueProcess(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
+	response := HealthResponse{
+		Status:    "ok",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Services:  services,
 	}
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	var req ProcessQueueRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
-		return
-	}
-
-	// Default batch size
-	if req.BatchSize <= 0 {
-		req.BatchSize = 10
-	}
-
-	// Queue processing temporarily disabled
-	writeJSON(w, http.StatusOK, ProcessQueueResponse{
-		Success: true,
-		Message: "Queue processing functionality temporarily disabled",
-	})
-}
-
-func (s *APIServer) processQueueAsync(batchSize int) {
-	log.Printf("Starting async queue processing with batch size %d", batchSize)
-
-	for !s.runner.queueState.IsEmpty() {
-		batch := s.runner.DequeueNextBatch(batchSize)
-		if len(batch) == 0 {
-			break
-		}
-
-		log.Printf("Processing batch of %d Gov IDs", len(batch))
-
-		// Use load balancer to assign govIDs to workers
-		workerAssignments := s.runner.loadBalancer.AssignBatchToWorkers(batch)
-
-		// Submit jobs for each worker
-		for workerID, govIDsForWorker := range workerAssignments {
-			if len(govIDsForWorker) == 0 {
-				continue
-			}
-
-			// Submit pipeline job
-			jobID := s.runner.SubmitPipelineJobForGovIDs(govIDsForWorker)
-			log.Printf("Job %s submitted for worker %s", jobID, workerID)
-
-			// Mark as processing
-			for _, govID := range govIDsForWorker {
-				s.runner.queueState.MarkProcessing(govID, workerID)
-			}
-		}
-
-		// No sleep - let workers continuously pull jobs from the queue as they become available
-	}
-
-	log.Printf("Async queue processing complete")
-}
-
-func (s *APIServer) handleQueueRetry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	var req RetryQueueRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
-		return
-	}
-
-	retriedCount := len(req.GovIDs)
-
-	writeJSON(w, http.StatusOK, RetryQueueResponse{
-		Success: true,
-		Retried: retriedCount,
-		Message: fmt.Sprintf("Retrying %d failed gov IDs", retriedCount),
-	})
-}
-
-func (s *APIServer) handleQueueSave(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	var req SaveQueueRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
-		return
-	}
-
-	filePath := req.FilePath
-	if filePath == "" {
-		filePath = "queue_state.json"
-	}
-
-	writeJSON(w, http.StatusOK, SaveQueueResponse{
-		Success:  true,
-		FilePath: filePath,
-		Message:  fmt.Sprintf("Queue state saved to %s", filePath),
-	})
-}
-
-func (s *APIServer) handleQueueLoad(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	var req LoadQueueRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
-		return
-	}
-
-	if req.FilePath == "" {
-		writeError(w, http.StatusBadRequest, "file_path is required")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, LoadQueueResponse{
-		Success: true,
-		Loaded:  "Queue loading temporarily disabled",
-		Message: fmt.Sprintf("Queue loading from %s temporarily disabled", req.FilePath),
-	})
-}
-
-func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"message": "Stats functionality temporarily disabled",
-	})
-}
-
-func (s *APIServer) handleJobs(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"message": "Jobs functionality temporarily disabled",
-	})
-}
-
-func (s *APIServer) handleJobSummary(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"message": "Job summary functionality temporarily disabled",
-	})
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
@@ -505,21 +216,6 @@ func (s *APIServer) SetupRoutes() *http.ServeMux {
 
 	// Health check
 	mux.HandleFunc("/api/health", s.handleHealth)
-
-	// Queue management
-	mux.HandleFunc("/api/queue/add", s.handleQueueAdd)
-	mux.HandleFunc("/api/queue/status", s.handleQueueStatus)
-	mux.HandleFunc("/api/queue/process", s.handleQueueProcess)
-	mux.HandleFunc("/api/queue/retry", s.handleQueueRetry)
-	mux.HandleFunc("/api/queue/save", s.handleQueueSave)
-	mux.HandleFunc("/api/queue/load", s.handleQueueLoad)
-
-	// Runner stats
-	mux.HandleFunc("/api/stats", s.handleStats)
-
-	// Job management
-	mux.HandleFunc("/api/jobs", s.handleJobs)
-	mux.HandleFunc("/api/jobs/", s.handleJobSummary)
 
 	// Full pipeline endpoint
 	mux.HandleFunc("/api/pipeline/full", s.handleFullPipeline)

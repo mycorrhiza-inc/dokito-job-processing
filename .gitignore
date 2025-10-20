@@ -1,2 +1,4 @@
 .devenv
 .env
+**/node_modules
+result

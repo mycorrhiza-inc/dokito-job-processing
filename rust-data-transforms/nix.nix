@@ -5,10 +5,10 @@ let
 
   dokito-backend = naersk'.buildPackage {
     src = ./.;
-    name = "dokito_processing_monolith";
+    name = "rust-data-transforms";
 
-    # Build only the main binary, not the whole workspace
-    cargoBuildOptions = x: x ++ [ "--package" "dokito_processing_monolith" ];
+    # Build the rust-data-transforms package
+    cargoBuildOptions = x: x ++ [ "--package" "rust-data-transforms" ];
 
     # Add any additional build inputs if needed
     nativeBuildInputs = with pkgs; [
@@ -33,7 +33,19 @@ in {
   apps = {
     default = {
       type = "app";
-      program = "${dokito-backend}/bin/dokito_processing_monolith";
+      program = "${dokito-backend}/bin/process-dockets";
+    };
+    process-dockets = {
+      type = "app";
+      program = "${dokito-backend}/bin/process-dockets";
+    };
+    upload-dockets = {
+      type = "app";
+      program = "${dokito-backend}/bin/upload-dockets";
+    };
+    download-attachments = {
+      type = "app";
+      program = "${dokito-backend}/bin/download-attachments";
     };
   };
 }

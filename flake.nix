@@ -8,13 +8,13 @@
       url = "github:nix-community/naersk";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    playwright-pkgs = {
-      url = "github:pietdevries94/nixpkgs-playwright";
+    gomod2nix = {
+      url = "github:nix-community/gomod2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = inputs@{ flake-parts, nixpkgs, naersk, playwright-pkgs, ... }:
+  outputs = inputs@{ flake-parts, nixpkgs, naersk, gomod2nix, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
 
@@ -23,23 +23,19 @@
           # Import component modules
           playwrightModule = import ./playwright/nix.nix {
             inherit pkgs system;
-            pkgs-playwright = playwright-pkgs.legacyPackages.${system};
+            pkgs-playwright = pkgs; # Use standard nixpkgs for playwright
           };
 
           rustModule = import ./rust-data-transforms/nix.nix {
             inherit pkgs system naersk;
           };
 
-          # Build Go server
-          goServer = pkgs.buildGoModule {
+          # Build Go server using gomod2nix
+          goServer = gomod2nix.legacyPackages.${system}.buildGoApplication {
             pname = "dokito-job-processing-server";
             version = "0.1.0";
             src = ./runner;
-
-            vendorHash = null; # No external dependencies
-
-            buildInputs = with pkgs; [ ];
-            nativeBuildInputs = with pkgs; [ go ];
+            modules = ./runner/gomod2nix.toml;
 
             meta = {
               description = "Dokito job processing API server";
@@ -57,19 +53,21 @@
             export OPENSCRAPER_PATH_UTAHCOAL="${playwrightModule.apps.utah-coal.program}"
 
             # Set dokito binary paths
-            export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/dokito_processing_monolith"
-            export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/dokito_processing_monolith"
-            export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/dokito_processing_monolith"
+            export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
+            export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
+            export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
 
             echo "🔧 Environment configured:"
             echo "  NYPUC: ${playwrightModule.apps.ny-puc.program}"
             echo "  COPUC: ${playwrightModule.apps.co-puc.program}"
             echo "  UtahCoal: ${playwrightModule.apps.utah-coal.program}"
-            echo "  Dokito: ${rustModule.packages.dokito-backend}/bin/dokito_processing_monolith"
+            echo "  Process: ${rustModule.packages.dokito-backend}/bin/process-dockets"
+            echo "  Upload: ${rustModule.packages.dokito-backend}/bin/upload-dockets"
+            echo "  Download: ${rustModule.packages.dokito-backend}/bin/download-attachments"
             echo ""
 
             # Execute the server
-            exec "${goServer}/bin/dokito-job-processing-server" "$@"
+            exec "${goServer}/bin/runner" "$@"
           '';
 
         in {
