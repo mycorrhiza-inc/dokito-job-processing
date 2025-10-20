@@ -10,6 +10,7 @@ import (
 	"time"
 
 	httpSwagger "github.com/swaggo/http-swagger"
+	_ "runner/docs"
 )
 
 type APIServer struct {
@@ -243,6 +244,11 @@ func (s *APIServer) SetupRoutes() *http.ServeMux {
 
 	// Swagger documentation
 	mux.HandleFunc("/swagger/", httpSwagger.WrapHandler)
+
+	// Serve swagger.json as doc.json for Swagger UI
+	mux.HandleFunc("/swagger/doc.json", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "./docs/swagger.json")
+	})
 
 	return mux
 }
