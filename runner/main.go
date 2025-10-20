@@ -42,18 +42,18 @@ type ScraperBinaryPaths struct {
 	UtahCoalPath string
 }
 
-type DokitoBinaryPaths struct {
-	ProcessDocketsPath      string
-	UploadDocketsPath       string
-	DownloadAttachmentsPath string
-}
-
 func getScraperPaths() ScraperBinaryPaths {
 	return ScraperBinaryPaths{
 		NYPUCPath:    os.Getenv("OPENSCRAPER_PATH_NYPUC"),
 		COPUCPath:    os.Getenv("OPENSCRAPER_PATH_COPUC"),
 		UtahCoalPath: os.Getenv("OPENSCRAPER_PATH_UTAHCOAL"),
 	}
+}
+
+type DokitoBinaryPaths struct {
+	ProcessDocketsPath      string
+	UploadDocketsPath       string
+	DownloadAttachmentsPath string
 }
 
 func getDokitoPaths() DokitoBinaryPaths {
@@ -205,7 +205,17 @@ func executeUploadBinary(data []map[string]interface{}, paths DokitoBinaryPaths)
 }
 
 func main() {
-	// Parse command line arguments
+	// Check if we're running in CLI mode
+	if len(os.Args) > 1 {
+		firstArg := os.Args[1]
+		// If first argument is not a number and not -port, assume CLI mode
+		if _, err := strconv.Atoi(firstArg); err != nil && firstArg != "-port" {
+			runCLI()
+			return
+		}
+	}
+
+	// Parse command line arguments for server mode
 	port := 8080
 	if len(os.Args) > 1 {
 		if p, err := strconv.Atoi(os.Args[1]); err == nil {
@@ -253,3 +263,4 @@ func main() {
 		log.Fatalf("❌ Server failed to start: %v", err)
 	}
 }
+
