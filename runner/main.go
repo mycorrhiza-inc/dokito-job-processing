@@ -31,7 +31,6 @@ import (
 )
 
 type Runner struct {
-	// Environment variable configurations
 	scraperPaths ScraperBinaryPaths
 	dokitoPaths  DokitoBinaryPaths
 }
