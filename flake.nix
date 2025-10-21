@@ -34,10 +34,8 @@
             inherit pkgs system gomod2nix;
           };
 
-          # Create a wrapper that sets up environment variables for the server
-          dokitoComplete = pkgs.writeShellScriptBin "dokito-complete" ''
-            set -euo pipefail
-
+          # Common environment variable setup function
+          dokitoEnvSetup = ''
             # Set scraper binary paths (these point to the app programs)
             export OPENSCRAPER_PATH_NYPUC="${playwrightModule.apps.ny-puc.program}"
             export OPENSCRAPER_PATH_COPUC="${playwrightModule.apps.co-puc.program}"
@@ -48,16 +46,27 @@
             export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
             export BINARY_EXECUTION_PATH=$(pwd)
+          '';
 
+          # Debug function that reads and displays the actual environment variables
+          dokitoEnvDebug = ''
             echo "🔧 Environment configured:"
-            echo "  NYPUC: ${playwrightModule.apps.ny-puc.program}"
-            echo "  COPUC: ${playwrightModule.apps.co-puc.program}"
-            echo "  UtahCoal: ${playwrightModule.apps.utah-coal.program}"
-            echo "  Process: ${rustModule.packages.dokito-backend}/bin/process-dockets"
-            echo "  Upload: ${rustModule.packages.dokito-backend}/bin/upload-dockets"
-            echo "  Download: ${rustModule.packages.dokito-backend}/bin/download-attachments"
-            echo "  Current Directory: $(pwd)"
+            echo "  NYPUC: $OPENSCRAPER_PATH_NYPUC"
+            echo "  COPUC: $OPENSCRAPER_PATH_COPUC"
+            echo "  UtahCoal: $OPENSCRAPER_PATH_UTAHCOAL"
+            echo "  Process: $DOKITO_PROCESS_DOCKETS_BINARY_PATH"
+            echo "  Upload: $DOKITO_UPLOAD_DOCKETS_BINARY_PATH"
+            echo "  Download: $DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"
+            echo "  Current Directory: $BINARY_EXECUTION_PATH"
             echo ""
+          '';
+
+          # Create a wrapper that sets up environment variables for the server
+          dokitoComplete = pkgs.writeShellScriptBin "dokito-complete" ''
+            set -euo pipefail
+
+            ${dokitoEnvSetup}
+            ${dokitoEnvDebug}
 
             # Execute the server
             exec "${runnerModule.binaries.server}" "$@"
@@ -67,17 +76,8 @@
           dokitoCLI = pkgs.writeShellScriptBin "dokito-cli" ''
             set -euo pipefail
 
-            # Set scraper binary paths (these point to the app programs)
-            export OPENSCRAPER_PATH_NYPUC="${playwrightModule.apps.ny-puc.program}"
-            export OPENSCRAPER_PATH_COPUC="${playwrightModule.apps.co-puc.program}"
-            export OPENSCRAPER_PATH_UTAHCOAL="${playwrightModule.apps.utah-coal.program}"
-
-            # Set dokito binary paths
-            export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
-            export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
-            export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
-
-            export BINARY_EXECUTION_PATH=$(pwd)
+            ${dokitoEnvSetup}
+            ${dokitoEnvDebug}
 
             # Execute the CLI
             exec "${runnerModule.binaries.cli}" "$@"

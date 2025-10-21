@@ -9,6 +9,11 @@ import (
 	"runner/internal/storage"
 )
 
+// NYPUCPipelineConfig contains configuration options for pipeline execution
+type NYPUCPipelineConfig struct {
+	DebugMode bool // Enable real-time subprocess output streaming
+}
+
 // NYPUCPipelineResult contains the results from the NY PUC pipeline execution
 type NYPUCPipelineResult struct {
 	GovID            string
@@ -36,6 +41,11 @@ func (e NYPUCPipelineError) Error() string {
 // ExecuteNYPUCBasicPipeline runs the complete NY PUC pipeline for a given government ID
 // This includes scraping, saving raw data, processing, saving processed data, and uploading
 func ExecuteNYPUCBasicPipeline(govID string) (*NYPUCPipelineResult, error) {
+	return ExecuteNYPUCBasicPipelineWithConfig(govID, NYPUCPipelineConfig{DebugMode: false})
+}
+
+// ExecuteNYPUCBasicPipelineWithConfig runs the NY PUC pipeline with configuration options
+func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfig) (*NYPUCPipelineResult, error) {
 	log.Printf("🚀 Starting NY PUC pipeline for govID: %s", govID)
 
 	// Get binary paths
@@ -55,7 +65,16 @@ func ExecuteNYPUCBasicPipeline(govID string) (*NYPUCPipelineResult, error) {
 
 	// Step 1: Execute scraper in ALL mode
 	log.Printf("📝 Step 1/4: Running scraper for %s", govID)
-	scrapeResults, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
+	var scrapeResults []map[string]any
+	var err error
+
+	if config.DebugMode {
+		log.Printf("🐛 Debug mode enabled - streaming subprocess output")
+		scrapeResults, err = core.ExecuteScraperWithALLModeDebug(govID, scraperType, scraperPaths)
+	} else {
+		scrapeResults, err = core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
+	}
+
 	if err != nil {
 		return result, NYPUCPipelineError{
 			Step:    "Scraping",
@@ -97,7 +116,13 @@ func ExecuteNYPUCBasicPipeline(govID string) (*NYPUCPipelineResult, error) {
 		}
 	}
 
-	processedResults, err := core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
+	var processedResults []map[string]any
+	if config.DebugMode {
+		processedResults, err = core.ExecuteDataProcessingBinaryDebug(validatedData, dokitoPaths)
+	} else {
+		processedResults, err = core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
+	}
+
 	if err != nil {
 		return result, NYPUCPipelineError{
 			Step:    "Data Processing",
@@ -129,7 +154,13 @@ func ExecuteNYPUCBasicPipeline(govID string) (*NYPUCPipelineResult, error) {
 
 	// Step 3: Upload results
 	log.Printf("📤 Step 3/4: Uploading processed data")
-	if err := core.ExecuteUploadBinary(processedResults, dokitoPaths); err != nil {
+	if config.DebugMode {
+		err = core.ExecuteUploadBinaryDebug(processedResults, dokitoPaths)
+	} else {
+		err = core.ExecuteUploadBinary(processedResults, dokitoPaths)
+	}
+
+	if err != nil {
 		return result, NYPUCPipelineError{
 			Step:    "Upload",
 			Message: "upload failed",

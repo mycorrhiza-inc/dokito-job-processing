@@ -65,8 +65,11 @@ func RunPipeline() {
 
 	govID := strings.TrimSpace(os.Args[2])
 
-	// Execute the shared NY PUC pipeline
-	result, err := pipelines.ExecuteNYPUCBasicPipeline(govID)
+	// Execute the shared NY PUC pipeline with debug mode enabled for CLI
+	config := pipelines.NYPUCPipelineConfig{
+		DebugMode: true, // Enable debug mode for CLI usage
+	}
+	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(govID, config)
 	if err != nil {
 		log.Printf("❌ Pipeline failed: %v", err)
 		os.Exit(1)
