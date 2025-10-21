@@ -1,3 +1,4 @@
+// Package internal Takes care of combined functionality needed for both binaries
 package internal
 
 import (
@@ -5,9 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
-
 	"runner/internal/core"
+	"runner/internal/pipelines"
+	"strings"
 )
 
 func RunCLI() {
@@ -63,53 +64,16 @@ func RunPipeline() {
 	}
 
 	govID := strings.TrimSpace(os.Args[2])
-	log.Printf("🚀 Starting full pipeline for govID: %s", govID)
 
-	// Get binary paths
-	scraperPaths := core.GetScraperPaths()
-	dokitoPaths := core.GetDokitoPaths()
-
-	// Initialize mapping and determine scraper type
-	mapping := core.GetDefaultGovIDMapping()
-	scraperType := mapping.GetScraperForGovID(govID)
-
-	log.Printf("📋 Using scraper type: %s", scraperType)
-
-	// Step 1: Execute scraper in ALL mode
-	log.Printf("📝 Step 1/3: Running scraper for %s", govID)
-	scrapeResults, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
+	// Execute the shared NY PUC pipeline
+	result, err := pipelines.ExecuteNYPUCBasicPipeline(govID)
 	if err != nil {
-		log.Printf("❌ Scraper execution failed: %v", err)
-		os.Exit(1)
-	}
-
-	log.Printf("✅ Scraper completed. Found %d results", len(scrapeResults))
-
-	// Step 2: Validate and process data
-	log.Printf("🔧 Step 2/3: Processing scraped data")
-	validatedData, err := core.ValidateJSONAsArrayOfMaps(scrapeResults)
-	if err != nil {
-		log.Printf("❌ Data validation failed: %v", err)
-		os.Exit(1)
-	}
-
-	processedResults, err := core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
-	if err != nil {
-		log.Printf("❌ Data processing failed: %v", err)
-		os.Exit(1)
-	}
-
-	log.Printf("✅ Processing completed. Processed %d results", len(processedResults))
-
-	// Step 3: Upload results
-	log.Printf("📤 Step 3/3: Uploading processed data")
-	if err := core.ExecuteUploadBinary(processedResults, dokitoPaths); err != nil {
-		log.Printf("❌ Upload failed: %v", err)
+		log.Printf("❌ Pipeline failed: %v", err)
 		os.Exit(1)
 	}
 
 	log.Printf("🎉 Full pipeline completed successfully for %s. Scraped %d items, processed %d items.",
-		govID, len(scrapeResults), len(processedResults))
+		result.GovID, result.ScrapeCount, result.ProcessCount)
 }
 
 func RunScrapeOnly() {
@@ -269,3 +233,4 @@ func getStatus(path string) string {
 
 	return fmt.Sprintf("✅ %s", path)
 }
+

@@ -1,3 +1,4 @@
+// Package core I dont know what this package does and I dont like it, claude giveth and claude taketh away
 package core
 
 import (
@@ -67,4 +68,3 @@ func ExecuteUploadBinary(data []map[string]any, paths DokitoBinaryPaths) error {
 
 	return nil
 }
-

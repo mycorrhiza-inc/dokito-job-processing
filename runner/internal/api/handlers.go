@@ -1,3 +1,4 @@
+// Package api Handles API related functionality and logic that still might be useful to other packages
 package api
 
 import (
@@ -6,10 +7,10 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"runner/internal/core"
+	"runner/internal/pipelines"
 	"strings"
 	"time"
-
-	"runner/internal/core"
 )
 
 type HealthResponse struct {
@@ -139,67 +140,37 @@ func HandleFullPipeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	govID := strings.TrimSpace(req.GovID)
-	log.Printf("🚀 Starting full pipeline for govID: %s", govID)
 
-	// Get binary paths
-	scraperPaths := core.GetScraperPaths()
-	dokitoPaths := core.GetDokitoPaths()
-
-	// Initialize mapping and determine scraper type
-	mapping := core.GetDefaultGovIDMapping()
-	scraperType := mapping.GetScraperForGovID(govID)
+	// Execute the shared NY PUC pipeline
+	result, err := pipelines.ExecuteNYPUCBasicPipeline(govID)
 
 	response := FullPipelineResponse{
-		GovID:       govID,
-		ScraperType: string(scraperType),
+		GovID: govID,
 	}
 
-	// Step 1: Execute scraper in ALL mode
-	log.Printf("📝 Step 1/3: Running scraper for %s", govID)
-	scrapeResults, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
 	if err != nil {
 		response.Success = false
-		response.Error = fmt.Sprintf("Scraper execution failed: %v", err)
+		response.Error = err.Error()
+		if result != nil {
+			response.ScraperType = result.ScraperType
+			response.ScrapeCount = result.ScrapeCount
+			response.ProcessCount = result.ProcessCount
+		}
 		writeJSON(w, http.StatusInternalServerError, response)
 		return
 	}
 
-	response.ScrapeCount = len(scrapeResults)
+	// Set scraper type from successful result
+	response.ScraperType = result.ScraperType
 
-	// Step 2: Validate and process data
-	log.Printf("🔧 Step 2/3: Processing scraped data")
-	validatedData, err := core.ValidateJSONAsArrayOfMaps(scrapeResults)
-	if err != nil {
-		response.Success = false
-		response.Error = fmt.Sprintf("Data validation failed: %v", err)
-		writeJSON(w, http.StatusInternalServerError, response)
-		return
-	}
-
-	processedResults, err := core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
-	if err != nil {
-		response.Success = false
-		response.Error = fmt.Sprintf("Data processing failed: %v", err)
-		writeJSON(w, http.StatusInternalServerError, response)
-		return
-	}
-
-	response.ProcessCount = len(processedResults)
-
-	// Step 3: Upload results
-	log.Printf("📤 Step 3/3: Uploading processed data")
-	if err := core.ExecuteUploadBinary(processedResults, dokitoPaths); err != nil {
-		response.Success = false
-		response.Error = fmt.Sprintf("Upload failed: %v", err)
-		writeJSON(w, http.StatusInternalServerError, response)
-		return
-	}
-
-	// Success
+	// Success - populate response with pipeline results
 	response.Success = true
+	response.ScrapeCount = result.ScrapeCount
+	response.ProcessCount = result.ProcessCount
 	response.Message = fmt.Sprintf("Full pipeline completed successfully for %s. Scraped %d items, processed %d items.",
-		govID, response.ScrapeCount, response.ProcessCount)
+		result.GovID, result.ScrapeCount, result.ProcessCount)
 
 	log.Printf("✅ Full pipeline completed for %s", govID)
 	writeJSON(w, http.StatusOK, response)
 }
+
