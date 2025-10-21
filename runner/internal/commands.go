@@ -167,7 +167,7 @@ func RunProcessOnly() {
 		os.Exit(1)
 	}
 
-	var inputData []map[string]interface{}
+	var inputData []map[string]any
 	if err := json.Unmarshal(data, &inputData); err != nil {
 		log.Printf("❌ Failed to parse JSON: %v", err)
 		os.Exit(1)
@@ -212,7 +212,7 @@ func RunUploadOnly() {
 		os.Exit(1)
 	}
 
-	var inputData []map[string]interface{}
+	var inputData []map[string]any
 	if err := json.Unmarshal(data, &inputData); err != nil {
 		log.Printf("❌ Failed to parse JSON: %v", err)
 		os.Exit(1)

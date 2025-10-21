@@ -64,7 +64,7 @@ func NewOpenscrapersBucketLocation(key string) (S3Location, error) {
 	}, nil
 }
 
-func (loc S3Location) WriteJSON(ctx context.Context, data interface{}) error {
+func (loc S3Location) WriteJSON(ctx context.Context, data any) error {
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal data to JSON: %v", err)
@@ -144,7 +144,7 @@ func (loc S3Location) ReadBytes(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
-func (loc S3Location) ReadJSON(ctx context.Context, target interface{}) error {
+func (loc S3Location) ReadJSON(ctx context.Context, target any) error {
 	data, err := loc.ReadBytes(ctx)
 	if err != nil {
 		return err

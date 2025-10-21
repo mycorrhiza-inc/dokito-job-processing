@@ -16,6 +16,12 @@ type RawDocketLocation struct {
 	DocketGovID      string
 }
 
+var NypucJurisdictionInfo = JurisdictionInfo{
+	Country:       "usa",
+	State:         "ny",
+	Jurisdictrion: "ny_puc",
+}
+
 func TryAndExtractGovid(obj map[string]any) (string, error) {
 	idOptions := []string{"docket_govid", "case_govid", "docket_id"}
 

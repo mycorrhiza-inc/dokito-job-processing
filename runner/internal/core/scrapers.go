@@ -34,7 +34,7 @@ func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths Scra
 		return nil, fmt.Errorf("scraper execution failed: %v", err)
 	}
 
-	var results []map[string]interface{}
+	var results []map[string]any
 	if err := json.Unmarshal(output, &results); err != nil {
 		return nil, fmt.Errorf("failed to parse scraper output as JSON: %v", err)
 	}

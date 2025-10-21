@@ -9,14 +9,14 @@ import (
 	"time"
 )
 
-func ValidateJSONAsArrayOfMaps(data []map[string]interface{}) ([]map[string]interface{}, error) {
+func ValidateJSONAsArrayOfMaps(data []map[string]any) ([]map[string]any, error) {
 	if data == nil {
 		return nil, fmt.Errorf("data is nil")
 	}
 	return data, nil
 }
 
-func ExecuteDataProcessingBinary(data []map[string]interface{}, paths DokitoBinaryPaths) ([]map[string]interface{}, error) {
+func ExecuteDataProcessingBinary(data []map[string]any, paths DokitoBinaryPaths) ([]map[string]any, error) {
 	if paths.ProcessDocketsPath == "" {
 		return nil, fmt.Errorf("process dockets binary path not configured")
 	}
@@ -37,7 +37,7 @@ func ExecuteDataProcessingBinary(data []map[string]interface{}, paths DokitoBina
 		return nil, fmt.Errorf("data processing failed: %v", err)
 	}
 
-	var results []map[string]interface{}
+	var results []map[string]any
 	if err := json.Unmarshal(output, &results); err != nil {
 		return nil, fmt.Errorf("failed to parse processing output as JSON: %v", err)
 	}
@@ -45,7 +45,7 @@ func ExecuteDataProcessingBinary(data []map[string]interface{}, paths DokitoBina
 	return results, nil
 }
 
-func ExecuteUploadBinary(data []map[string]interface{}, paths DokitoBinaryPaths) error {
+func ExecuteUploadBinary(data []map[string]any, paths DokitoBinaryPaths) error {
 	if paths.UploadDocketsPath == "" {
 		return fmt.Errorf("upload dockets binary path not configured")
 	}
@@ -67,3 +67,4 @@ func ExecuteUploadBinary(data []map[string]interface{}, paths DokitoBinaryPaths)
 
 	return nil
 }
+

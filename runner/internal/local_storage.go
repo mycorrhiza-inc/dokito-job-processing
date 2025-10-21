@@ -1,3 +1,5 @@
+// Package internal provides local file storage utilities and interfaces
+// for managing local file operations including JSON serialization.
 package internal
 
 import (
@@ -31,6 +33,16 @@ func GetPlaywrightIntermediateDir() string {
 // CannonicalLocalPath represents something that can generate a canonical local file path
 type CannonicalLocalPath interface {
 	GenerateCannonicalPath() string
+}
+
+// SaveJSONToPath saves a JSON object to the specified file path
+func SaveJSONToPath(path string, data any) error {
+	return WriteJSONToPath(context.Background(), path, data)
+}
+
+// RetriveJSONFromPath retrieves a JSON object from the specified file path
+func RetriveJSONFromPath(path string, target any) error {
+	return ReadJSONFromPath(context.Background(), path, target)
 }
 
 // WriteJSON marshals data to JSON and writes it using a CannonicalLocalPath
@@ -109,4 +121,3 @@ func ReadJSONFromPath(ctx context.Context, path string, target any) error {
 
 	return nil
 }
-
