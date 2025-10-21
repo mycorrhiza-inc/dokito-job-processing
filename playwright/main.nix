@@ -21,7 +21,7 @@ let
       export NODE_PATH="${nodePackages.package}/lib/node_modules/js_scrapers/node_modules"
 
       cd "${nodePackages.package}/lib/node_modules/js_scrapers"
-      echo "Running ${name} scraper..."
+      echo "Running ${name} scraper..." >&2
       ${pkgs.nodePackages.ts-node}/bin/ts-node ${script} "$@"
     ''}";
   };

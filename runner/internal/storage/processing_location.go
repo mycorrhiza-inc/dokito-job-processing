@@ -38,21 +38,24 @@ func TryAndExtractGovid(obj map[string]any) (string, error) {
 
 func (rawDocket RawDocketLocation) GenerateCannonicalLocalPath() string {
 	basePath := GetProcessingIntermediateDir()
+	jsonFilename := rawDocket.DocketGovID + ".json"
 	return path.Join(basePath,
 		"objects_raw",
 		rawDocket.JurisdictionInfo.Country,
 		rawDocket.JurisdictionInfo.State,
 		rawDocket.JurisdictionInfo.Jurisdictrion,
-		rawDocket.DocketGovID)
+		jsonFilename,
+	)
 }
 
 func (rawDocket RawDocketLocation) GenerateCannonicalS3Path() S3Location {
+	jsonFilename := rawDocket.DocketGovID + ".json"
 	key := path.Join(
 		"objects_raw",
 		rawDocket.JurisdictionInfo.Country,
 		rawDocket.JurisdictionInfo.State,
 		rawDocket.JurisdictionInfo.Jurisdictrion,
-		rawDocket.DocketGovID)
+		jsonFilename)
 	baseS3Location, _ := NewOpenscrapersBucketLocation(key)
 
 	return baseS3Location
@@ -64,22 +67,24 @@ type ProcessedDocketLocation struct {
 }
 
 func (processedDocket ProcessedDocketLocation) GenerateCannonicalLocalPath() string {
+	jsonFilename := processedDocket.DocketGovID + ".json"
 	basePath := GetProcessingIntermediateDir()
 	return path.Join(basePath,
 		"objects",
 		processedDocket.JurisdictionInfo.Country,
 		processedDocket.JurisdictionInfo.State,
 		processedDocket.JurisdictionInfo.Jurisdictrion,
-		processedDocket.DocketGovID)
+		jsonFilename)
 }
 
 func (processedDocket ProcessedDocketLocation) GenerateCannonicalS3Path() S3Location {
+	jsonFilename := processedDocket.DocketGovID + ".json"
 	key := path.Join(
 		"objects",
 		processedDocket.JurisdictionInfo.Country,
 		processedDocket.JurisdictionInfo.State,
 		processedDocket.JurisdictionInfo.Jurisdictrion,
-		processedDocket.DocketGovID)
+		jsonFilename)
 	baseS3Location, _ := NewOpenscrapersBucketLocation(key)
 
 	return baseS3Location
