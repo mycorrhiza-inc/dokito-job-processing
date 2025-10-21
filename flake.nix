@@ -47,6 +47,7 @@
             export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
             export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
+            export BINARY_EXECUTION_PATH=$(pwd)
 
             echo "🔧 Environment configured:"
             echo "  NYPUC: ${playwrightModule.apps.ny-puc.program}"
@@ -56,7 +57,6 @@
             echo "  Upload: ${rustModule.packages.dokito-backend}/bin/upload-dockets"
             echo "  Download: ${rustModule.packages.dokito-backend}/bin/download-attachments"
             echo "  Current Directory: $(pwd)"
-            echo $(pwd)
             echo ""
 
             # Execute the server
@@ -76,6 +76,8 @@
             export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
             export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
+
+            export BINARY_EXECUTION_PATH=$(pwd)
 
             # Execute the CLI
             exec "${runnerModule.binaries.cli}" "$@"
