@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"runner/internal/storage"
 )
 
 func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths ScraperBinaryPaths) ([]map[string]any, error) {
@@ -28,7 +30,8 @@ func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths Scra
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binaryPath, "--gov-ids", govID, "--mode", "all")
+	intermediateDir := storage.GetPlaywrightIntermediateDir()
+	cmd := exec.CommandContext(ctx, binaryPath, "--gov-ids", govID, "--mode", "all", "--intermediate-dir", intermediateDir)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("scraper execution failed: %v", err)
@@ -63,7 +66,8 @@ func ExecuteScraperWithALLModeDebug(govID string, scraperType ScraperType, paths
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binaryPath, "--gov-ids", govID, "--mode", "all")
+	intermediateDir := storage.GetPlaywrightIntermediateDir()
+	cmd := exec.CommandContext(ctx, binaryPath, "--gov-ids", govID, "--mode", "all", "--intermediate-dir", intermediateDir)
 	label := fmt.Sprintf("🔍 [%s]", scraperType)
 
 	// Use helper function for debug streaming
