@@ -26,15 +26,10 @@ let
 
 in {
   packages = {
-    default = dokito-backend;
     dokito-backend = dokito-backend;
   };
 
   apps = {
-    default = {
-      type = "app";
-      program = "${dokito-backend}/bin/process-dockets";
-    };
     process-dockets = {
       type = "app";
       program = "${dokito-backend}/bin/process-dockets";

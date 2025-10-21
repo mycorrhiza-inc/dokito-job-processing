@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"encoding/json"
@@ -6,11 +6,13 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"runner/internal/core"
 )
 
-func runCLI() {
+func RunCLI() {
 	if len(os.Args) < 2 {
-		printUsage()
+		PrintUsage()
 		os.Exit(1)
 	}
 
@@ -18,25 +20,25 @@ func runCLI() {
 
 	switch command {
 	case "pipeline":
-		runPipeline()
+		RunPipeline()
 	case "scrape":
-		runScrapeOnly()
+		RunScrapeOnly()
 	case "process":
-		runProcessOnly()
+		RunProcessOnly()
 	case "upload":
-		runUploadOnly()
+		RunUploadOnly()
 	case "env":
-		showEnvironment()
+		ShowEnvironment()
 	case "help", "-h", "--help":
-		printUsage()
+		PrintUsage()
 	default:
 		fmt.Printf("Unknown command: %s\n", command)
-		printUsage()
+		PrintUsage()
 		os.Exit(1)
 	}
 }
 
-func printUsage() {
+func PrintUsage() {
 	fmt.Println("Dokito CLI - Debug tool for the job processing pipeline")
 	fmt.Println("")
 	fmt.Println("Usage:")
@@ -53,7 +55,7 @@ func printUsage() {
 	fmt.Println("  dokito-cli env")
 }
 
-func runPipeline() {
+func RunPipeline() {
 	if len(os.Args) < 3 {
 		fmt.Println("Error: gov_id required")
 		fmt.Println("Usage: dokito-cli pipeline <gov_id>")
@@ -64,18 +66,18 @@ func runPipeline() {
 	log.Printf("🚀 Starting full pipeline for govID: %s", govID)
 
 	// Get binary paths
-	scraperPaths := getScraperPaths()
-	dokitoPaths := getDokitoPaths()
+	scraperPaths := core.GetScraperPaths()
+	dokitoPaths := core.GetDokitoPaths()
 
 	// Initialize mapping and determine scraper type
-	mapping := getDefaultGovIDMapping()
-	scraperType := mapping.getScraperForGovID(govID)
+	mapping := core.GetDefaultGovIDMapping()
+	scraperType := mapping.GetScraperForGovID(govID)
 
 	log.Printf("📋 Using scraper type: %s", scraperType)
 
 	// Step 1: Execute scraper in ALL mode
 	log.Printf("📝 Step 1/3: Running scraper for %s", govID)
-	scrapeResults, err := executeScraperWithALLMode(govID, scraperType, scraperPaths)
+	scrapeResults, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
 	if err != nil {
 		log.Printf("❌ Scraper execution failed: %v", err)
 		os.Exit(1)
@@ -85,13 +87,13 @@ func runPipeline() {
 
 	// Step 2: Validate and process data
 	log.Printf("🔧 Step 2/3: Processing scraped data")
-	validatedData, err := validateJSONAsArrayOfMaps(scrapeResults)
+	validatedData, err := core.ValidateJSONAsArrayOfMaps(scrapeResults)
 	if err != nil {
 		log.Printf("❌ Data validation failed: %v", err)
 		os.Exit(1)
 	}
 
-	processedResults, err := executeDataProcessingBinary(validatedData, dokitoPaths)
+	processedResults, err := core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
 	if err != nil {
 		log.Printf("❌ Data processing failed: %v", err)
 		os.Exit(1)
@@ -101,7 +103,7 @@ func runPipeline() {
 
 	// Step 3: Upload results
 	log.Printf("📤 Step 3/3: Uploading processed data")
-	if err := executeUploadBinary(processedResults, dokitoPaths); err != nil {
+	if err := core.ExecuteUploadBinary(processedResults, dokitoPaths); err != nil {
 		log.Printf("❌ Upload failed: %v", err)
 		os.Exit(1)
 	}
@@ -110,7 +112,7 @@ func runPipeline() {
 		govID, len(scrapeResults), len(processedResults))
 }
 
-func runScrapeOnly() {
+func RunScrapeOnly() {
 	if len(os.Args) < 3 {
 		fmt.Println("Error: gov_id required")
 		fmt.Println("Usage: dokito-cli scrape <gov_id>")
@@ -121,16 +123,16 @@ func runScrapeOnly() {
 	log.Printf("🔍 Running scraper only for govID: %s", govID)
 
 	// Get binary paths
-	scraperPaths := getScraperPaths()
+	scraperPaths := core.GetScraperPaths()
 
 	// Initialize mapping and determine scraper type
-	mapping := getDefaultGovIDMapping()
-	scraperType := mapping.getScraperForGovID(govID)
+	mapping := core.GetDefaultGovIDMapping()
+	scraperType := mapping.GetScraperForGovID(govID)
 
 	log.Printf("📋 Using scraper type: %s", scraperType)
 
 	// Execute scraper
-	results, err := executeScraperWithALLMode(govID, scraperType, scraperPaths)
+	results, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
 	if err != nil {
 		log.Printf("❌ Scraper execution failed: %v", err)
 		os.Exit(1)
@@ -148,7 +150,7 @@ func runScrapeOnly() {
 	fmt.Println(string(output))
 }
 
-func runProcessOnly() {
+func RunProcessOnly() {
 	if len(os.Args) < 3 {
 		fmt.Println("Error: json_file required")
 		fmt.Println("Usage: dokito-cli process <json_file>")
@@ -172,10 +174,10 @@ func runProcessOnly() {
 	}
 
 	// Get dokito paths
-	dokitoPaths := getDokitoPaths()
+	dokitoPaths := core.GetDokitoPaths()
 
 	// Process data
-	results, err := executeDataProcessingBinary(inputData, dokitoPaths)
+	results, err := core.ExecuteDataProcessingBinary(inputData, dokitoPaths)
 	if err != nil {
 		log.Printf("❌ Data processing failed: %v", err)
 		os.Exit(1)
@@ -193,7 +195,7 @@ func runProcessOnly() {
 	fmt.Println(string(output))
 }
 
-func runUploadOnly() {
+func RunUploadOnly() {
 	if len(os.Args) < 3 {
 		fmt.Println("Error: json_file required")
 		fmt.Println("Usage: dokito-cli upload <json_file>")
@@ -217,10 +219,10 @@ func runUploadOnly() {
 	}
 
 	// Get dokito paths
-	dokitoPaths := getDokitoPaths()
+	dokitoPaths := core.GetDokitoPaths()
 
 	// Upload data
-	if err := executeUploadBinary(inputData, dokitoPaths); err != nil {
+	if err := core.ExecuteUploadBinary(inputData, dokitoPaths); err != nil {
 		log.Printf("❌ Upload failed: %v", err)
 		os.Exit(1)
 	}
@@ -228,12 +230,12 @@ func runUploadOnly() {
 	log.Printf("✅ Upload completed successfully")
 }
 
-func showEnvironment() {
+func ShowEnvironment() {
 	fmt.Println("🔧 Environment Configuration:")
 	fmt.Println("")
 
-	scraperPaths := getScraperPaths()
-	dokitoPaths := getDokitoPaths()
+	scraperPaths := core.GetScraperPaths()
+	dokitoPaths := core.GetDokitoPaths()
 
 	fmt.Println("Scraper Binaries:")
 	fmt.Printf("  NYPUC:    %s\n", getStatus(scraperPaths.NYPUCPath))

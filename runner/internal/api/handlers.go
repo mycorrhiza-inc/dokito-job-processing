@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"encoding/json"
@@ -9,13 +9,8 @@ import (
 	"strings"
 	"time"
 
-	httpSwagger "github.com/swaggo/http-swagger"
-	_ "runner/docs"
+	"runner/internal/core"
 )
-
-type APIServer struct {
-	runner interface{}
-}
 
 type HealthResponse struct {
 	Status    string            `json:"status"`
@@ -49,29 +44,6 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
-func (s *APIServer) loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %v", r.Method, r.URL.Path, time.Since(start))
-	})
-}
-
-func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
 // @Summary Health check endpoint
 // @Description Get the health status of the API and all configured services
 // @Tags health
@@ -80,15 +52,15 @@ func (s *APIServer) corsMiddleware(next http.Handler) http.Handler {
 // @Success 200 {object} HealthResponse
 // @Failure 405 {object} map[string]string
 // @Router /api/health [get]
-func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	// Check scraper paths
-	scraperPaths := getScraperPaths()
-	dokitoPaths := getDokitoPaths()
+	scraperPaths := core.GetScraperPaths()
+	dokitoPaths := core.GetDokitoPaths()
 
 	services := make(map[string]string)
 
@@ -142,7 +114,7 @@ func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 // @Failure 405 {object} map[string]string
 // @Failure 500 {object} FullPipelineResponse
 // @Router /api/pipeline/full [post]
-func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
+func HandleFullPipeline(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
@@ -170,12 +142,12 @@ func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 	log.Printf("🚀 Starting full pipeline for govID: %s", govID)
 
 	// Get binary paths
-	scraperPaths := getScraperPaths()
-	dokitoPaths := getDokitoPaths()
+	scraperPaths := core.GetScraperPaths()
+	dokitoPaths := core.GetDokitoPaths()
 
 	// Initialize mapping and determine scraper type
-	mapping := getDefaultGovIDMapping()
-	scraperType := mapping.getScraperForGovID(govID)
+	mapping := core.GetDefaultGovIDMapping()
+	scraperType := mapping.GetScraperForGovID(govID)
 
 	response := FullPipelineResponse{
 		GovID:       govID,
@@ -184,7 +156,7 @@ func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 
 	// Step 1: Execute scraper in ALL mode
 	log.Printf("📝 Step 1/3: Running scraper for %s", govID)
-	scrapeResults, err := executeScraperWithALLMode(govID, scraperType, scraperPaths)
+	scrapeResults, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
 	if err != nil {
 		response.Success = false
 		response.Error = fmt.Sprintf("Scraper execution failed: %v", err)
@@ -196,7 +168,7 @@ func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 
 	// Step 2: Validate and process data
 	log.Printf("🔧 Step 2/3: Processing scraped data")
-	validatedData, err := validateJSONAsArrayOfMaps(scrapeResults)
+	validatedData, err := core.ValidateJSONAsArrayOfMaps(scrapeResults)
 	if err != nil {
 		response.Success = false
 		response.Error = fmt.Sprintf("Data validation failed: %v", err)
@@ -204,7 +176,7 @@ func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	processedResults, err := executeDataProcessingBinary(validatedData, dokitoPaths)
+	processedResults, err := core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
 	if err != nil {
 		response.Success = false
 		response.Error = fmt.Sprintf("Data processing failed: %v", err)
@@ -216,7 +188,7 @@ func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 
 	// Step 3: Upload results
 	log.Printf("📤 Step 3/3: Uploading processed data")
-	if err := executeUploadBinary(processedResults, dokitoPaths); err != nil {
+	if err := core.ExecuteUploadBinary(processedResults, dokitoPaths); err != nil {
 		response.Success = false
 		response.Error = fmt.Sprintf("Upload failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, response)
@@ -230,22 +202,4 @@ func (s *APIServer) handleFullPipeline(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ Full pipeline completed for %s", govID)
 	writeJSON(w, http.StatusOK, response)
-}
-
-// SetupRoutes configures all API routes
-func (s *APIServer) SetupRoutes() *http.ServeMux {
-	mux := http.NewServeMux()
-
-	// Health check
-	mux.HandleFunc("/api/health", s.handleHealth)
-
-	// Full pipeline endpoint
-	mux.HandleFunc("/api/pipeline/full", s.handleFullPipeline)
-
-	// Swagger documentation
-	mux.Handle("/swagger/", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
-	))
-
-	return mux
 }

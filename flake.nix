@@ -30,17 +30,8 @@
             inherit pkgs system naersk;
           };
 
-          # Build Go server using gomod2nix
-          goServer = gomod2nix.legacyPackages.${system}.buildGoApplication {
-            pname = "dokito-job-processing-server";
-            version = "0.1.0";
-            src = ./runner;
-            modules = ./runner/gomod2nix.toml;
-
-            meta = {
-              description = "Dokito job processing API server";
-              platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
-            };
+          runnerModule = import ./runner/main.nix {
+            inherit pkgs system gomod2nix;
           };
 
           # Create a wrapper that sets up environment variables for the server
@@ -69,7 +60,7 @@
             echo ""
 
             # Execute the server
-            exec "${goServer}/bin/runner" "$@"
+            exec "${runnerModule.binaries.server}" "$@"
           '';
 
           # Create a CLI wrapper that sets up environment variables and runs in CLI mode
@@ -87,7 +78,7 @@
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
 
             # Execute the CLI
-            exec "${goServer}/bin/runner" "$@"
+            exec "${runnerModule.binaries.cli}" "$@"
           '';
 
         in {
@@ -96,8 +87,7 @@
             default = dokitoComplete;
             dokito-complete = dokitoComplete;
             dokito-cli = dokitoCLI;
-            go-server = goServer;
-          } // playwrightModule.packages // rustModule.packages;
+          } // playwrightModule.packages // rustModule.packages // runnerModule.packages;
 
           # Apps
           apps = {
