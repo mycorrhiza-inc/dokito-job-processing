@@ -1,6 +1,9 @@
 package internal
 
-import "path"
+import (
+	"errors"
+	"path"
+)
 
 type JurisdictionInfo struct {
 	Country       string
@@ -14,7 +17,17 @@ type RawDocketLocation struct {
 }
 
 func TryAndExtractGovid(obj map[string]any) (string, error) {
-	id := obj["docket_gov_id"]
+	idOptions := []string{"docket_govid", "case_govid", "docket_id"}
+
+	for _, key := range idOptions {
+		if val, ok := obj[key]; ok {
+			if str, ok := val.(string); ok && str != "" {
+				return str, nil
+			}
+		}
+	}
+
+	return "", errors.New("error: could not extract govid")
 }
 
 func (rawDocket RawDocketLocation) GenerateCannonicalPath() string {
