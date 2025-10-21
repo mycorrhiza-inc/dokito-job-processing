@@ -1,19 +1,24 @@
+use anyhow::Result;
 use clap::Parser;
+use rust_data_transforms::cli_input_types::CliProcessedDockets;
+use rust_data_transforms::data_processing_traits::DownloadIncomplete;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::processing::attachments::OpenscrapersExtraData;
-use rust_data_transforms::data_processing_traits::DownloadIncomplete;
-use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
 use serde_json;
 use std::io::{self, Read, Write};
-use anyhow::Result;
 use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "download-attachments")]
 #[command(about = "Downloads attachments for processed generic dockets and fills in hashes")]
 struct Cli {
-    #[arg(long, value_enum, help = "Fixed jurisdiction (unused but kept for consistency)", default_value = "new_york_puc")]
+    #[arg(
+        long,
+        value_enum,
+        help = "Fixed jurisdiction (unused but kept for consistency)",
+        default_value = "new_york_puc"
+    )]
     fixed_jur: FixedJurisdiction,
 }
 
@@ -54,14 +59,14 @@ async fn main() -> Result<()> {
         }
     }
 
-    let result = if processed_dockets.len() == 1 {
-        serde_json::to_string(&processed_dockets[0])?
-    } else {
-        serde_json::to_string(&processed_dockets)?
-    };
+    // This returns a list even if only one was imported just to make the output json schema
+    // consistent.
+    let result = serde_json::to_string(&processed_dockets)?;
+
     io::stdout().write_all(result.as_bytes())?;
 
     io::stdout().flush()?;
 
     Ok(())
 }
+

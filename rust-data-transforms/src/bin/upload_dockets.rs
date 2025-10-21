@@ -1,18 +1,22 @@
+use anyhow::Result;
 use clap::Parser;
-use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
-use rust_data_transforms::sql_ingester_tasks::nypuc_ingest::ingest_sql_fixed_jurisdiction_case;
-use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::cli_input_types::CliProcessedDockets;
+use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
+use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
+use rust_data_transforms::sql_ingester_tasks::nypuc_ingest::ingest_sql_fixed_jurisdiction_case;
 use serde_json;
 use std::io::{self, Read, Write};
-use anyhow::Result;
 use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "upload-dockets")]
 #[command(about = "Uploads processed generic dockets to PostgreSQL database")]
 struct Cli {
-    #[arg(long, value_enum, help = "Fixed jurisdiction to use for database upload")]
+    #[arg(
+        long,
+        value_enum,
+        help = "Fixed jurisdiction to use for database upload"
+    )]
     fixed_jur: FixedJurisdiction,
 }
 
@@ -38,17 +42,17 @@ async fn main() -> Result<()> {
     let mut processed_dockets: Vec<_> = cli_processed_dockets.into();
 
     for processed_docket in processed_dockets.iter_mut() {
-        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, &pool, false).await?;
+        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, pool, false).await?;
     }
 
-    let result = if processed_dockets.len() == 1 {
-        serde_json::to_string(&processed_dockets[0])?
-    } else {
-        serde_json::to_string(&processed_dockets)?
-    };
+    // This returns a list even if only one was imported just to make the output json schema
+    // consistent.
+    //
+    let result = serde_json::to_string(&processed_dockets)?;
     io::stdout().write_all(result.as_bytes())?;
 
     io::stdout().flush()?;
 
     Ok(())
 }
+
