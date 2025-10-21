@@ -30,7 +30,7 @@ func ExecuteDataProcessingBinary(data []map[string]any, paths DokitoBinaryPaths)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, paths.ProcessDocketsPath, "process")
+	cmd := exec.CommandContext(ctx, paths.ProcessDocketsPath, "--fixed-jur", "new_york_puc")
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 
 	output, err := cmd.Output()
@@ -59,7 +59,7 @@ func ExecuteUploadBinary(data []map[string]any, paths DokitoBinaryPaths) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, paths.UploadDocketsPath, "upload")
+	cmd := exec.CommandContext(ctx, paths.UploadDocketsPath, "--fixed-jur", "new_york_puc")
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 
 	if err := cmd.Run(); err != nil {
@@ -83,7 +83,7 @@ func ExecuteDataProcessingBinaryDebug(data []map[string]any, paths DokitoBinaryP
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, paths.ProcessDocketsPath, "process")
+	cmd := exec.CommandContext(ctx, paths.ProcessDocketsPath, "--fixed-jur", "new_york_puc")
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 
 	// Use helper function for debug streaming
@@ -114,7 +114,7 @@ func ExecuteUploadBinaryDebug(data []map[string]any, paths DokitoBinaryPaths) er
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, paths.UploadDocketsPath, "upload")
+	cmd := exec.CommandContext(ctx, paths.UploadDocketsPath, "--fixed-jur", "new_york_puc")
 	cmd.Stdin = strings.NewReader(string(inputJSON))
 
 	// Use helper function for debug streaming (no output needed)
