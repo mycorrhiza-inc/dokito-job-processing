@@ -21,12 +21,12 @@
       perSystem = { config, self', inputs', pkgs, system, ... }:
         let
           # Import component modules
-          playwrightModule = import ./playwright/nix.nix {
+          playwrightModule = import ./playwright/main.nix {
             inherit pkgs system;
             pkgs-playwright = pkgs; # Use standard nixpkgs for playwright
           };
 
-          rustModule = import ./rust-data-transforms/nix.nix {
+          rustModule = import ./rust-data-transforms/main.nix {
             inherit pkgs system naersk;
           };
 
@@ -64,6 +64,8 @@
             echo "  Process: ${rustModule.packages.dokito-backend}/bin/process-dockets"
             echo "  Upload: ${rustModule.packages.dokito-backend}/bin/upload-dockets"
             echo "  Download: ${rustModule.packages.dokito-backend}/bin/download-attachments"
+            echo "  Current Directory: $(pwd)"
+            echo $(pwd)
             echo ""
 
             # Execute the server

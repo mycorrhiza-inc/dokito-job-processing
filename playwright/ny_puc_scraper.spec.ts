@@ -32,6 +32,7 @@ interface ScrapingOptions {
   headed?: boolean;
   missing?: boolean;
   todayFilings?: boolean;
+  intermediateDir?: string;
 }
 
 // class NyPucScraper implements Scraper {
@@ -45,11 +46,13 @@ class NyPucScraper {
   max_concurrent_browsers: number = 4;
   pageCache: Record<string, any> = {};
   urlTable: Record<string, string> = {};
+  baseDirectory: string;
 
-  constructor(page: Page, context: any, browser: Browser) {
+  constructor(page: Page, context: any, browser: Browser, baseDirectory: string) {
     this.rootPage = page;
     this.context = context;
     this.browser = browser;
+    this.baseDirectory = baseDirectory;
   }
 
   pages(): any {
@@ -119,6 +122,11 @@ class NyPucScraper {
     currentHash: string
   ): Promise<any | null> {
     try {
+      // Skip if no base directory configured
+      if (!this.baseDirectory) {
+        return null;
+      }
+
       // Parse URL to build directory path
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
@@ -129,7 +137,7 @@ class NyPucScraper {
       const directoryPath = pathParts.join('/');
 
       const fullDirectory = path.join(
-        process.cwd(),
+        this.baseDirectory,
         'raw',
         'ny',
         'puc',
@@ -172,6 +180,11 @@ class NyPucScraper {
     parsedData: any
   ): Promise<void> {
     try {
+      // Skip if no base directory configured
+      if (!this.baseDirectory) {
+        return;
+      }
+
       // Parse URL to build directory path
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
@@ -182,7 +195,7 @@ class NyPucScraper {
       const directoryPath = pathParts.join('/');
 
       const fullDirectory = path.join(
-        process.cwd(),
+        this.baseDirectory,
         'raw',
         'ny',
         'puc',
@@ -246,6 +259,11 @@ class NyPucScraper {
     stage: string
   ): Promise<void> {
     try {
+      // Skip if no base directory configured
+      if (!this.baseDirectory) {
+        return;
+      }
+
       // Parse URL
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
@@ -259,7 +277,7 @@ class NyPucScraper {
 
       // Build full directory path
       const fullDirectory = path.join(
-        process.cwd(),
+        this.baseDirectory,
         'raw',
         'ny',
         'puc',
@@ -1540,6 +1558,7 @@ function parseArguments(): ScrapingOptions | null {
   let headed = false; // Default to headless
   let missing = false; // Default to not checking for missing
   let todayFilings = false; // Default to not running today's filings workflow
+  let intermediateDir: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1577,6 +1596,8 @@ function parseArguments(): ScrapingOptions | null {
       missing = true;
     } else if (arg === "--today-filings") {
       todayFilings = true;
+    } else if (arg === "--intermediate-dir") {
+      intermediateDir = args[++i];
     } else if (!arg.startsWith("--")) {
       // Backward compatibility for JSON array
       try {
@@ -1615,6 +1636,7 @@ function parseArguments(): ScrapingOptions | null {
     headed,
     missing,
     todayFilings,
+    intermediateDir,
   };
 }
 
@@ -1797,11 +1819,15 @@ async function main() {
       process.exit(1);
     }
 
+    if (!customOptions.intermediateDir) {
+      console.log("ℹ️  No --intermediate-dir specified. Intermediate files will not be saved.");
+    }
+
     // Launch the browser based on the 'headed' option
     browser = await chromium.launch({ headless: !customOptions.headed });
     const context = await browser.newContext();
     const rootpage = await context.newPage();
-    const scraper = new NyPucScraper(rootpage, context, browser);
+    const scraper = new NyPucScraper(rootpage, context, browser, customOptions.intermediateDir || "");
 
     // Use custom scraping logic
     await runCustomScraping(scraper, customOptions);
