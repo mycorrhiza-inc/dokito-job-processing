@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths ScraperBinaryPaths) ([]map[string]interface{}, error) {
+func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths ScraperBinaryPaths) ([]map[string]any, error) {
 	var binaryPath string
 	switch scraperType {
 	case NYPUC:
@@ -41,3 +41,4 @@ func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths Scra
 
 	return results, nil
 }
+

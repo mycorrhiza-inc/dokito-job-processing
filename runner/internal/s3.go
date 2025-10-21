@@ -15,6 +15,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+type CannonicalS3Path interface {
+	GenerateCannonicalPath() S3Location
+}
+
 // S3Location represents an S3 object location with bucket and key
 type S3Location struct {
 	Bucket    string `json:"bucket"`
@@ -94,7 +98,6 @@ func (loc S3Location) WriteBytes(ctx context.Context, data []byte) error {
 		Key:    aws.String(loc.Key),
 		Body:   bytes.NewReader(data),
 	})
-
 	if err != nil {
 		return fmt.Errorf("failed to upload to S3: %v", err)
 	}
@@ -153,3 +156,4 @@ func (loc S3Location) ReadJSON(ctx context.Context, target interface{}) error {
 
 	return nil
 }
+
