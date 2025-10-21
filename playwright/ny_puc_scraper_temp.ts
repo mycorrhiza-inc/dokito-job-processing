@@ -1734,7 +1734,7 @@ async function runCustomScraping(
     if (options.outFile) {
       await saveResultsToFile(results, options.outFile, options.mode);
     } else {
-      console.log(JSON.stringify(results, null, 2));
+      console.error(JSON.stringify(results, null, 2));
     }
     return;
   }
@@ -1802,7 +1802,7 @@ async function runCustomScraping(
   if (options.outFile) {
     await saveResultsToFile(results, options.outFile, options.mode);
   } else {
-    console.log(JSON.stringify(results, null, 2));
+    console.error(JSON.stringify(results, null, 2));
   }
 }
 

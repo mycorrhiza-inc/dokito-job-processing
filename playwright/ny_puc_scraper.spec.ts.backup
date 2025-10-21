@@ -159,16 +159,16 @@ class NyPucScraper {
           entry.blake2_hash === currentHash &&
           entry.parsed_data !== undefined
         ) {
-          console.error(`Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+          console.log(`Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
           return entry.parsed_data;
         }
       }
 
-      console.error(`Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+      console.log(`Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
       return null;
     } catch (error) {
       // File doesn't exist or other error - cache miss
-      console.error(`Cache MISS for ${stage} at ${url} (no metadata file)`);
+      console.log(`Cache MISS for ${stage} at ${url} (no metadata file)`);
       return null;
     }
   }
@@ -244,7 +244,7 @@ class NyPucScraper {
           'utf-8'
         );
 
-        console.error(`Saved parsed data to cache for ${stage} at ${url}`);
+        console.log(`Saved parsed data to cache for ${stage} at ${url}`);
       } else {
         console.warn(`Could not find metadata entry to update for ${stage} at ${url}`);
       }
@@ -312,7 +312,7 @@ class NyPucScraper {
         file_size: Buffer.byteLength(html, 'utf-8')
       });
 
-      console.error(`Saved HTML snapshot: ${fullPath}`);
+      console.log(`Saved HTML snapshot: ${fullPath}`);
     } catch (error) {
       console.error(`Failed to save HTML snapshot for ${url}:`, error);
     }
@@ -338,7 +338,7 @@ class NyPucScraper {
         const task = tasks[taskIndex];
         running++;
 
-        console.error(
+        console.log(
           `Starting task ${taskIndex + 1}/${tasks.length} (${running} running, max: ${maxConcurrent})`,
         );
 
@@ -352,7 +352,7 @@ class NyPucScraper {
         } finally {
           running--;
           completed++;
-          console.error(
+          console.log(
             `Completed task ${taskIndex + 1}/${tasks.length} (${running} still running)`,
           );
 
@@ -408,7 +408,7 @@ class NyPucScraper {
         // Wait for the loading spinner to disappear
         await this.waitForLoadingSpinner(page);
 
-        console.error(`Getting page content at ${url}...`);
+        console.log(`Getting page content at ${url}...`);
         const html = await page.content();
 
         // Save HTML snapshot if stage is provided
@@ -444,7 +444,7 @@ class NyPucScraper {
   async getDateCases(dateString: string): Promise<Partial<RawGenericDocket>[]> {
     // eg dateString = 09/09/2025
     const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=&MT=&MST=&CN=&SDT=${dateString}&SDF=${dateString}&C=&M=&CO=0`;
-    console.error(`getting cases for date ${dateString}`);
+    console.log(`getting cases for date ${dateString}`);
     const cases: Partial<RawGenericDocket>[] = await this.getCasesAt(url);
     return cases;
   }
@@ -454,7 +454,7 @@ class NyPucScraper {
   }
 
   async getCasesAt(url: string): Promise<Partial<RawGenericDocket>[]> {
-    console.error(`Navigating to ${url}`);
+    console.log(`Navigating to ${url}`);
     const $ = await this.getPage(url, "search-results");
 
     // Calculate hash for cache check
@@ -469,7 +469,7 @@ class NyPucScraper {
 
     const cases: Partial<RawGenericDocket>[] = [];
 
-    console.error("Extracting industry affected...");
+    console.log("Extracting industry affected...");
     let industry_affected = $("#GridPlaceHolder_lblSearchCriteriaValue")
       .text()
       .trim();
@@ -482,14 +482,14 @@ class NyPucScraper {
       industry_affected = "Unknown";
     }
 
-    console.error("Extracting rows from the table...");
+    console.log("Extracting rows from the table...");
     const rows = await this.getGeneralRows($);
-    console.error(`Found ${rows.length} rows.`);
+    console.log(`Found ${rows.length} rows.`);
 
     rows.each((i, row) => {
       const cells = $(row).find("td");
       if (cells.length >= 6) {
-        console.error("Extracting case data from row...");
+        console.log("Extracting case data from row...");
         const case_govid = $(cells[0]).find("a").text();
         const case_url = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${case_govid}`;
         const matter_type = $(cells[1]).text();
@@ -509,7 +509,7 @@ class NyPucScraper {
           industry: industry_affected,
         };
         cases.push(caseData);
-        console.error(`Successfully extracted case: ${case_govid}`);
+        console.log(`Successfully extracted case: ${case_govid}`);
       }
     });
 
@@ -555,7 +555,7 @@ class NyPucScraper {
   async getAllCaseList(): Promise<Partial<RawGenericDocket>[]> {
     const industry_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const promises = industry_numbers.map((industry_number) => {
-      console.error(`Processing industry index: ${industry_number}`);
+      console.log(`Processing industry index: ${industry_number}`);
       const industry_url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=${industry_number}`;
       return this.getCasesAt(industry_url);
     });
@@ -618,7 +618,7 @@ class NyPucScraper {
   async getCaseMeta(gov_id: string): Promise<Partial<RawGenericDocket>> {
     // get main page
     const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=&MT=&MST=&CN=&MNO=${gov_id}&CO=0&C=&M=&CO=0`;
-    console.error(`getting cases metadata for date ${gov_id}`);
+    console.log(`getting cases metadata for date ${gov_id}`);
     const cases: Partial<RawGenericDocket>[] = await this.getCasesAt(url);
     const basicMetadata = cases[0];
 
@@ -656,7 +656,7 @@ class NyPucScraper {
     const parties: RawGenericParty[] = [];
     const partiesTablebodySelector = "#tblActiveParty > tbody";
     const rows = $(`${partiesTablebodySelector} tr`);
-    console.error(`Found ${rows.length} party rows.`);
+    console.log(`Found ${rows.length} party rows.`);
 
     rows.each((i, row) => {
       const cells = $(row).find("td");
@@ -672,7 +672,7 @@ class NyPucScraper {
         .map((part) => part.trim())
         .filter((part) => part.length > 0);
 
-      console.error(`Row ${i} name cell parts:`, nameCellParts);
+      console.log(`Row ${i} name cell parts:`, nameCellParts);
 
       let fullName = "";
       let title = "";
@@ -734,7 +734,7 @@ class NyPucScraper {
         },
       };
 
-      console.error(`Parsed party ${i}:`, {
+      console.log(`Parsed party ${i}:`, {
         raw_input: nameCellParts[0] || "",
         full_name: fullName,
         first_name: firstName,
@@ -756,7 +756,7 @@ class NyPucScraper {
     filingOnBehalfOf?: string;
   } | null> {
     try {
-      console.error(`Fetching filing metadata from: ${filingUrl}`);
+      console.log(`Fetching filing metadata from: ${filingUrl}`);
       const $ = await this.getPage(filingUrl, "filing-detail");
 
       // Calculate hash for cache check
@@ -771,7 +771,7 @@ class NyPucScraper {
 
       const filingInfo = $("#filing_info");
       if (filingInfo.length === 0) {
-        console.error("No filing_info section found on page");
+        console.log("No filing_info section found on page");
         return null;
       }
 
@@ -809,7 +809,7 @@ class NyPucScraper {
         metadata.filingOnBehalfOf = filingOnBehalfOfElement.text().trim();
       }
 
-      console.error(`Extracted filing metadata:`, metadata);
+      console.log(`Extracted filing metadata:`, metadata);
 
       // Save parsed data to cache
       await this.saveParsedDataToCache(filingUrl, "filing-detail", htmlHash, metadata);
@@ -877,7 +877,7 @@ class NyPucScraper {
   private async enhanceFilingsWithMetadataConcurrent(
     filings: RawGenericFiling[],
   ): Promise<void> {
-    console.error("Enhancing filings with additional metadata concurrently...");
+    console.log("Enhancing filings with additional metadata concurrently...");
 
     // Use the existing processTasksWithQueue method for concurrent processing
     await this.processTasksWithQueue(
@@ -889,7 +889,7 @@ class NyPucScraper {
       this.max_concurrent_browsers
     );
 
-    console.error("Finished enhancing all filings with metadata.");
+    console.log("Finished enhancing all filings with metadata.");
   }
 
 
@@ -960,13 +960,13 @@ class NyPucScraper {
       // The count is available in the page header before the table loads
       // It's in an element with text like "Filed Documents (1234)"
       const countText = await page.textContent('#GridPlaceHolder_lbtPubDoc');
-      console.error(`Raw element text for filed documents count: "${countText}"`);
+      console.log(`Raw element text for filed documents count: "${countText}"`);
 
       if (countText) {
         const match = countText.match(/Filed Documents \((\d+)\)/);
         if (match) {
           const count = parseInt(match[1], 10);
-          console.error(`Extracted filed documents count: ${count}`);
+          console.log(`Extracted filed documents count: ${count}`);
           return count;
         } else {
           console.warn(`Text found but didn't match expected pattern: "${countText}"`);
@@ -997,12 +997,12 @@ class NyPucScraper {
     url: string,
     caseGovId: string,
   ): Promise<RawGenericFiling[]> {
-    console.error("Starting document extraction from HTML...");
+    console.log("Starting document extraction from HTML...");
     const $ = cheerio.load(html);
     const filingsMap = new Map<string, RawGenericFiling>();
     const docRows = $(`${tableSelector} tr`);
 
-    console.error(`Found ${docRows.length} document rows.`);
+    console.log(`Found ${docRows.length} document rows.`);
 
     // First pass: extract basic filing data
     docRows.each((i, docRow) => {
@@ -1069,12 +1069,12 @@ class NyPucScraper {
       }
     });
 
-    console.error("Finished basic document extraction.");
+    console.log("Finished basic document extraction.");
 
     // Second pass: fetch metadata concurrently for all filings
     const filings = Array.from(filingsMap.values());
     if (filings.length > 0) {
-      console.error(`Fetching metadata concurrently for ${filings.length} filings...`);
+      console.log(`Fetching metadata concurrently for ${filings.length} filings...`);
       await this.enhanceFilingsWithMetadataConcurrent(filings);
     }
 
@@ -1085,7 +1085,7 @@ class NyPucScraper {
     govId: string,
     caseMetadata: Partial<RawGenericDocket>
   ): Promise<RawGenericFiling[]> {
-    console.error(`Scraping documents for ${govId} using monthly search (large docket >1000 documents)`);
+    console.log(`Scraping documents for ${govId} using monthly search (large docket >1000 documents)`);
 
     // Get the case start date from metadata
     let startDate: Date;
@@ -1117,7 +1117,7 @@ class NyPucScraper {
       const startDateStr = this.formatDate(currentStart);
       const endDateStr = this.formatDate(currentEnd);
 
-      console.error(`Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`);
+      console.log(`Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`);
 
       const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=0&IA=&MT=&MST=&CN=&MNO=${govId}&CO=0&C=&M=&CO=0&DFF=${startDateStr}&DFT=${endDateStr}&DT=&CI=0&FC=`;
 
@@ -1141,7 +1141,7 @@ class NyPucScraper {
           await this.saveParsedDataToCache(url, "filing-search", htmlHash, monthFilings);
         }
 
-        console.error(`Found ${monthFilings.length} filings for month ${startDateStr}`);
+        console.log(`Found ${monthFilings.length} filings for month ${startDateStr}`);
         allFilings.push(...monthFilings);
       } catch (error) {
         console.error(`Error fetching filings for ${govId} from ${startDateStr} to ${endDateStr}:`, error);
@@ -1152,7 +1152,7 @@ class NyPucScraper {
       currentStart.setDate(1); // First day of next month
     }
 
-    console.error(`Total filings scraped for ${govId}: ${allFilings.length}`);
+    console.log(`Total filings scraped for ${govId}: ${allFilings.length}`);
     return allFilings;
   }
 
@@ -1163,7 +1163,7 @@ class NyPucScraper {
   ): Promise<RawGenericFiling[] | { documents: RawGenericFiling[]; page: Page; context: any; metadata?: Partial<RawGenericDocket> }> {
     let windowContext = null;
     try {
-      console.error(`Scraping documents for case: ${govId} (new window)`);
+      console.log(`Scraping documents for case: ${govId} (new window)`);
       const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${govId}`;
       const { context, page } = await this.newWindow();
       windowContext = context;
@@ -1253,7 +1253,7 @@ class NyPucScraper {
         windowContext = existingPage.context;
       } else {
         // Create new window and navigate
-        console.error(`Scraping parties for case: ${govId} (new window)`);
+        console.log(`Scraping parties for case: ${govId} (new window)`);
         const newWindow = await this.newWindow();
         windowContext = newWindow.context;
         page = newWindow.page;
@@ -1268,7 +1268,7 @@ class NyPucScraper {
       // Check if parties tab shows (0) - if so, return early
       const partiesButtonText = await page.textContent(partiesButtonSelector);
       if (partiesButtonText && partiesButtonText.includes("(0)")) {
-        console.error(`No parties found for case ${govId} - returning early`);
+        console.log(`No parties found for case ${govId} - returning early`);
         if (shouldCloseWindow && windowContext) {
           await windowContext.close();
         }
@@ -1332,7 +1332,7 @@ class NyPucScraper {
     govId: string,
   ): Promise<Partial<RawGenericDocket> | null> {
     try {
-      console.error(`Scraping metadata for case: ${govId}`);
+      console.log(`Scraping metadata for case: ${govId}`);
       const metadata = await this.getCaseMeta(govId);
       return metadata;
     } catch (error) {
@@ -1360,7 +1360,7 @@ class NyPucScraper {
     govIds: string[],
     mode: ScrapingMode,
   ): Promise<Partial<RawGenericDocket>[]> {
-    console.error(
+    console.log(
       `Scraping ${govIds.length} cases in ${mode} mode (parallel processing)`,
     );
 
@@ -1436,15 +1436,15 @@ class NyPucScraper {
       try {
         return_result = await processId(govID);
         if (return_result !== null) {
-          console.error(return_result.case_govid);
+          console.log(return_result.case_govid);
           // Upload disabled
           // try {
           //   await pushResultsToUploader([return_result], mode);
           // } catch (e) {
-          //   console.error(e);
+          //   console.log(e);
           // }
         } else {
-          console.error("Result was equal to null.");
+          console.log("Result was equal to null.");
         }
         return return_result;
       } catch (err) {
@@ -1512,12 +1512,12 @@ class NyPucScraper {
   async getTodaysFilingsWorkflow(
     mode: ScrapingMode = ScrapingMode.ALL,
   ): Promise<Partial<RawGenericDocket>[]> {
-    console.error("Starting today's filings workflow...");
+    console.log("Starting today's filings workflow...");
 
     // Get today's date
     const today = new Date();
     const formattedDate = this.formatDate(today);
-    console.error(`Searching for filings from: ${formattedDate}`);
+    console.log(`Searching for filings from: ${formattedDate}`);
 
     // Get all unique case numbers that had filings today
     const caseNumbers = await this.getDocketIdsWithFilingsBetweenDates(
@@ -1525,18 +1525,18 @@ class NyPucScraper {
       today,
     );
 
-    console.error(`Found ${caseNumbers.length} cases with filings today: ${caseNumbers.join(', ')}`);
+    console.log(`Found ${caseNumbers.length} cases with filings today: ${caseNumbers.join(', ')}`);
 
     if (caseNumbers.length === 0) {
-      console.error("No filings found for today");
+      console.log("No filings found for today");
       return [];
     }
 
     // Run full scraping pipeline for each case
-    console.error(`Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`);
+    console.log(`Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`);
     const results = await this.scrapeByGovIds(caseNumbers, mode);
 
-    console.error(`Today's filings workflow complete. Processed ${results.length} cases.`);
+    console.log(`Today's filings workflow complete. Processed ${results.length} cases.`);
     return results;
   }
 }
@@ -1648,10 +1648,10 @@ async function saveResultsToFile(
   try {
     const jsonData = JSON.stringify(results, null, 2);
     fs.writeFileSync(outFile, jsonData, "utf-8");
-    console.error(
+    console.log(
       `✅ Successfully saved ${results.length} results to ${outFile}`,
     );
-    console.error(
+    console.log(
       `📊 Mode: ${mode}, File size: ${(jsonData.length / 1024).toFixed(2)} KB`,
     );
   } catch (error) {
@@ -1680,7 +1680,7 @@ async function pushResultsToUploader(
   }
   const url = "http://localhost:33399/admin/cases/upload_raw";
 
-  console.error(`Uploading ${results.length} with mode ${mode} to uploader.`);
+  console.log(`Uploading ${results.length} with mode ${mode} to uploader.`);
 
   try {
     const payload = results.map((docket) => ({
@@ -1708,7 +1708,7 @@ async function pushResultsToUploader(
       );
     }
     let govid_list = results.map((x) => x.case_govid);
-    console.error(`Successfully uploaded dockets to s3: ${govid_list}`);
+    console.log(`Successfully uploaded dockets to s3: ${govid_list}`);
 
     return "successfully uploaded docket";
   } catch (err) {
@@ -1726,9 +1726,9 @@ async function runCustomScraping(
 
   // Handle today's filings workflow
   if (options.todayFilings) {
-    console.error("Running today's filings workflow...");
+    console.log("Running today's filings workflow...");
     const results = await scraper.getTodaysFilingsWorkflow(options.mode);
-    console.error(`Today's filings workflow completed with ${results.length} results`);
+    console.log(`Today's filings workflow completed with ${results.length} results`);
 
     // Save or output results
     if (options.outFile) {
@@ -1746,36 +1746,36 @@ async function runCustomScraping(
   if (options.govIds && options.govIds.length > 0) {
     // Explicit gov IDs provided
     govIds = options.govIds;
-    console.error(`Using ${govIds.length} explicitly provided gov IDs`);
+    console.log(`Using ${govIds.length} explicitly provided gov IDs`);
   } else if (options.dateString) {
     // Single date provided
-    console.error(`Getting cases for date: ${options.dateString}`);
+    console.log(`Getting cases for date: ${options.dateString}`);
     casesToScrape = await scraper.getDateCases(options.dateString);
-    console.error(
+    console.log(
       `Found ${casesToScrape.length} cases for date ${options.dateString}`,
     );
   } else if (options.beginDate && options.endDate) {
     // Date range provided
-    console.error(
+    console.log(
       `Getting cases between ${options.beginDate} and ${options.endDate}`,
     );
     casesToScrape = await scraper.getCasesBetweenDates(
       new Date(options.beginDate),
       new Date(options.endDate),
     );
-    console.error(
+    console.log(
       `Found ${casesToScrape.length} cases between ${options.beginDate} and ${options.endDate}`,
     );
   } else {
     // No specific cases provided
     if (options.missing) {
-      console.error("No specific cases provided, getting all missing cases");
+      console.log("No specific cases provided, getting all missing cases");
       casesToScrape = await scraper.getAllMissingCaseList();
-      console.error(`Found ${casesToScrape.length} missing cases`);
+      console.log(`Found ${casesToScrape.length} missing cases`);
     } else {
-      console.error("No specific cases provided, getting all cases");
+      console.log("No specific cases provided, getting all cases");
       casesToScrape = await scraper.getAllCaseList();
-      console.error(`Found ${casesToScrape.length} cases`);
+      console.log(`Found ${casesToScrape.length} cases`);
     }
   }
 
@@ -1793,10 +1793,10 @@ async function runCustomScraping(
   }
 
   // Now scrape the cases with the specified mode
-  console.error(`Scraping ${govIds.length} cases in ${options.mode} mode`);
+  console.log(`Scraping ${govIds.length} cases in ${options.mode} mode`);
   const results = await scraper.scrapeByGovIds(govIds, options.mode);
 
-  console.error(`Scraped ${results.length} results in ${options.mode} mode`);
+  console.log(`Scraped ${results.length} results in ${options.mode} mode`);
 
   // Save or output results
   if (options.outFile) {

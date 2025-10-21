@@ -6,6 +6,7 @@ use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use serde_json;
 use std::io::{self, Read, Write};
 use anyhow::Result;
+use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "upload-dockets")]
@@ -17,6 +18,11 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
     let cli = Cli::parse();
 
     let mut input = String::new();
