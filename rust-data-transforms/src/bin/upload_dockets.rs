@@ -5,8 +5,10 @@ use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::sql_ingester_tasks::nypuc_ingest::ingest_sql_fixed_jurisdiction_case;
 use serde_json;
+use sqlx::{query, PgPool};
 use std::io::{self, Read, Write};
 use tracing_subscriber;
+use tracing::info;
 
 #[derive(Parser)]
 #[command(name = "upload-dockets")]
@@ -18,6 +20,38 @@ struct Cli {
         help = "Fixed jurisdiction to use for database upload"
     )]
     fixed_jur: FixedJurisdiction,
+
+    #[arg(
+        long,
+        help = "Preserve existing dockets instead of deleting them before upload"
+    )]
+    preserve_existing: bool,
+}
+
+async fn delete_existing_docket_cascade(
+    pool: &PgPool,
+    docket_govid: &str,
+    fixed_jur: FixedJurisdiction,
+) -> Result<()> {
+    let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    // Check if docket exists and delete it (cascade will handle all dependent records)
+    let deleted_count = query(&format!(
+        "DELETE FROM {}.dockets WHERE docket_govid = $1",
+        pg_schema
+    ))
+    .bind(docket_govid)
+    .execute(pool)
+    .await?
+    .rows_affected();
+
+    if deleted_count > 0 {
+        info!("Deleted existing docket {} with cascade", docket_govid);
+    } else {
+        info!("No existing docket found for {}, proceeding with upload", docket_govid);
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -42,7 +76,12 @@ async fn main() -> Result<()> {
     let mut processed_dockets: Vec<_> = cli_processed_dockets.into();
 
     for processed_docket in processed_dockets.iter_mut() {
-        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, pool, false).await?;
+        // Delete existing docket if preserve_existing is false (default behavior)
+        if !cli.preserve_existing {
+            delete_existing_docket_cascade(&pool, processed_docket.case_govid.as_str(), cli.fixed_jur).await?;
+        }
+
+        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, &pool, false).await?;
     }
 
     // This returns a list even if only one was imported just to make the output json schema
