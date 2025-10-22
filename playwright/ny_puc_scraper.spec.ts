@@ -647,7 +647,7 @@ class NyPucScraper {
 
     if (matterSubtype) {
       const prefix = "NEW Case Proceeding:";
-      if (matterSubtype.toLowercase().startsWith(prefix.toLowerCase())) {
+      if (matterSubtype.toLowerCase().startsWith(prefix.toLowerCase())) {
         matterSubtype = matterSubtype.slice(prefix.length).trim();
       }
       metadata.case_subtype = matterSubtype;
