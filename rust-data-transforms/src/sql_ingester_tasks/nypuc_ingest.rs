@@ -4,14 +4,13 @@ use std::{
     mem::take,
 };
 
-use async_trait::async_trait;
 use crate::types::{
     env_vars::DIGITALOCEAN_S3,
-    raw::JurisdictionInfo,
     processed::{ProcessedGenericDocket, ProcessedGenericFiling, ProcessedGenericOrganization},
-    raw::RawGenericDocket,
+    raw::JurisdictionInfo,
     s3_stuff::{DocketAddress, list_raw_cases_for_jurisdiction},
 };
+use async_trait::async_trait;
 use futures::future::join_all;
 use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
 use schemars::JsonSchema;
@@ -20,16 +19,13 @@ use serde_json::Value;
 use sqlx::{PgPool, Pool, Postgres, query_scalar, types::Uuid};
 
 use mycorrhiza_common::{
-    s3_generic::cannonical_location::{download_openscrapers_object, upload_object},
     tasks::ExecuteUserTask,
 };
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
 use crate::{
-    data_processing_traits::Revalidate,
     jurisdiction_schema_mapping::FixedJurisdiction,
-    processing::{attachments::OpenscrapersExtraData, process_case},
     sql_ingester_tasks::{
         database_author_association::*, dokito_sql_connection::get_dokito_pool,
         recreate_dokito_table_schema::delete_all_data,
@@ -169,32 +165,12 @@ async fn filter_out_existing_dokito_cases(
 async fn get_processed_case_or_process_if_not_existing(
     case_address: &DocketAddress,
 ) -> anyhow::Result<ProcessedGenericDocket> {
-    let s3_client = DIGITALOCEAN_S3.make_s3_client().await;
-    let case_res =
-        download_openscrapers_object::<ProcessedGenericDocket>(&s3_client, case_address).await;
-    let docket = match case_res {
-        Ok(docket) => Ok(docket),
-        Err(_) => {
-            let jurisdiction = case_address.jurisdiction.clone();
-            let raw_case =
-                download_openscrapers_object::<RawGenericDocket>(&s3_client, case_address).await?;
-            let fixed_jurisdiction = FixedJurisdiction::try_from(&jurisdiction).unwrap();
-            let extra_info = OpenscrapersExtraData {
-                s3_client,
-                jurisdiction_info: jurisdiction,
-                fixed_jurisdiction,
-            };
-
-            process_case(raw_case, extra_info).await
-        }
-    };
-    match docket {
-        Ok(mut docket) => {
-            docket.revalidate().await;
-            Ok(docket)
-        }
-        Err(e) => Err(e),
-    }
+    // S3 functionality removed - this function now returns an error
+    // The coordination framework should handle docket retrieval instead
+    anyhow::bail!(
+        "S3 docket retrieval removed from process-dockets binary. Case: {}",
+        case_address.docket_govid
+    )
 }
 
 async fn ingest_wrapped_fixed_jurisdiction_data(
@@ -244,22 +220,12 @@ pub async fn ingest_sql_case_with_retries(
     ignore_existing: bool,
     tries: usize,
 ) -> anyhow::Result<()> {
-    let initial_hash = generate_hash(&*case);
+    let _initial_hash = generate_hash(&*case);
     let mut return_res = Ok(());
     let pg_schema = fixed_jur.get_postgres_schema_name();
     for remaining_tries in (0..tries).rev() {
         match ingest_sql_fixed_jurisdiction_case(case, fixed_jur, pool, ignore_existing).await {
             Ok(val) => {
-                let hash_post_upload = generate_hash(&*case);
-                if hash_post_upload != initial_hash {
-                    let s3_client = DIGITALOCEAN_S3.make_s3_client().await;
-                    let addr = DocketAddress {
-                        docket_govid: case.case_govid.to_string(),
-                        jurisdiction: fixed_jur.into(),
-                    };
-                    // If this doesnt work everything should still be okay
-                    let _ = upload_object(&s3_client, &addr, &*case).await;
-                }
                 return Ok(val);
             }
             Err(err) => {
@@ -416,14 +382,12 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
 
             // Associate individual authors using the proper association functions
             for individual_author in filing.individual_authors.iter_mut() {
-                upload_filing_human_author(individual_author, filing_uuid, fixed_jur, pool)
-                    .await?;
+                upload_filing_human_author(individual_author, filing_uuid, fixed_jur, pool).await?;
             }
 
             // Associate organization authors using the proper association functions
             for org_author in filing.organization_authors.iter_mut() {
-                upload_filing_organization_author(org_author, filing_uuid, fixed_jur, pool)
-                    .await?;
+                upload_filing_organization_author(org_author, filing_uuid, fixed_jur, pool).await?;
             }
 
             for attachment in filing.attachments.iter_mut() {

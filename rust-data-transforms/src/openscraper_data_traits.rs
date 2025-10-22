@@ -13,10 +13,9 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::data_processing_traits::{ProcessFrom, Revalidate, RevalidationOutcome};
-use crate::indexes::attachment_url_index::lookup_hash_from_url;
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::llm_prompts::{
-    clean_up_organization_name_list, split_and_fix_organization_names_blob,
+    clean_up_organization_name_list,
 };
 use crate::processing::match_raw_processed::{
     match_raw_attaches_to_processed_attaches, match_raw_filings_to_processed_filings,
@@ -91,11 +90,9 @@ impl Revalidate for ProcessedGenericAttachment {
             did_change = RevalidationOutcome::DidChange
         }
         if self.hash.is_none() && !self.url.is_empty() {
-            let url = &*self.url;
-            let opt_raw_attach = lookup_hash_from_url(url).await;
-            if let Some(raw_attach) = opt_raw_attach {
-                self.hash = Some(raw_attach.hash);
-            }
+            // Skip hash lookup for process-dockets binary to avoid potential delays
+            // This should be handled by the coordination framework instead
+            tracing::debug!("Skipping hash lookup for attachment URL in process-dockets binary");
         }
         did_change
     }
@@ -305,7 +302,14 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
             "Party processing completed"
         );
         processed_filings.sort_by_key(|v| v.index_in_docket);
-        let llmed_petitioner_list = split_and_fix_organization_names_blob(&input.petitioner).await;
+        // Skip LLM processing of petitioner field for process-dockets binary
+        // This should be handled by the coordination framework instead
+        let llmed_petitioner_list = if !input.petitioner.trim().is_empty() {
+            tracing::info!("Skipping LLM petitioner processing in process-dockets binary");
+            vec![] // Return empty list to avoid external API calls
+        } else {
+            vec![]
+        };
         let final_processed_docket = ProcessedGenericDocket {
             object_uuid,
             case_parties: processed_parties,
@@ -445,9 +449,11 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
                 tracing::info!(
                     filing_index = index_data.index,
                     org_blob_length = input.organization_authors_blob.len(),
-                    "Processing org authors with LLM"
+                    "Skipping LLM org authors processing in process-dockets binary"
                 );
-                split_and_fix_organization_names_blob(&input.organization_authors_blob).await
+                // Skip LLM processing to avoid external API calls in process-dockets binary
+                // This should be handled by the coordination framework instead
+                vec![]
             } else {
                 clean_up_organization_name_list(input.organization_authors)
             }
