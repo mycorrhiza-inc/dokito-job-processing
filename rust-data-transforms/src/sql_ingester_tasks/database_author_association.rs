@@ -105,7 +105,7 @@ async fn find_and_merge_humans_by_name(
 
     let mut tx = pool.begin().await?;
 
-    let mut canonical = matches[0].clone();
+    let canonical = matches[0].clone();
 
     let mut all_emails: BTreeSet<String> = canonical.contact_emails.clone().into_iter().collect();
     let mut all_phones: BTreeSet<String> = canonical

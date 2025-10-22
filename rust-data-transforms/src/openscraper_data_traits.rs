@@ -135,25 +135,100 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
         let cached_filings = cached.map(|d| d.filings);
         let matched_filings =
             match_raw_filings_to_processed_filings(input.filings, cached_filings);
-        let processed_filings_futures =
-            matched_filings
-                .into_iter()
-                .enumerate()
-                .map(async |(index, (f_raw, f_cached))| {
-                    let filing_index_data = IndexExtraData {
-                        index: index as u64,
-                        jurisdiction: fixed_jurisdiction,
-                    };
-                    let res =
-                        ProcessedGenericFiling::process_from(f_raw, f_cached, filing_index_data)
+
+        // Process filings in batches to avoid memory exhaustion and connection pool issues
+        // For large dockets (>100 filings), process in smaller batches
+        tracing::info!(
+            total_filings = matched_filings.len(),
+            "Starting filing processing"
+        );
+
+        let mut processed_filings = if matched_filings.len() > 100 {
+            let mut results = Vec::with_capacity(matched_filings.len());
+            let total_batches = (matched_filings.len() + 49) / 50; // Round up division
+
+            tracing::info!(
+                total_batches = total_batches,
+                batch_size = 50,
+                "Processing large docket in batches"
+            );
+
+            // Process in batches of 50 to avoid overwhelming memory/connections
+            for (batch_offset, batch) in matched_filings.chunks(50).enumerate() {
+                tracing::info!(
+                    batch_number = batch_offset + 1,
+                    total_batches = total_batches,
+                    batch_size = batch.len(),
+                    "Starting batch processing"
+                );
+
+                let batch_futures = batch
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, (f_raw, f_cached))| {
+                        let filing_index_data = IndexExtraData {
+                            index: (batch_offset * 50 + idx) as u64,
+                            jurisdiction: fixed_jurisdiction,
+                        };
+                        let f_raw_clone = f_raw.clone();
+                        let f_cached_clone = f_cached.clone();
+                        async move {
+                            let res = ProcessedGenericFiling::process_from(
+                                f_raw_clone,
+                                f_cached_clone,
+                                filing_index_data,
+                            )
                             .await;
-                    let Ok(val) = res;
-                    val
-                });
-        // Everything gets processed at once since the limiting factor on filings is global. This
-        // is to make it so that it doesnt overwhelm the system trying to process 5 dockets with
-        // 10,000 filings, but it can process 60 dockets at the same time with one filing each.
-        let mut processed_filings = join_all(processed_filings_futures).await;
+                            let Ok(val) = res;
+                            val
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let mut batch_results = join_all(batch_futures).await;
+                results.append(&mut batch_results);
+
+                tracing::info!(
+                    batch_number = batch_offset + 1,
+                    processed_so_far = results.len(),
+                    total_filings = matched_filings.len(),
+                    "Completed batch processing"
+                );
+
+                // Brief pause between batches to allow cleanup
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+
+            tracing::info!(
+                total_processed = results.len(),
+                "Completed all batch processing"
+            );
+            results
+        } else {
+            tracing::info!("Processing small docket all at once");
+            // Original logic for smaller dockets - process all at once
+            let processed_filings_futures =
+                matched_filings
+                    .into_iter()
+                    .enumerate()
+                    .map(async |(index, (f_raw, f_cached))| {
+                        let filing_index_data = IndexExtraData {
+                            index: index as u64,
+                            jurisdiction: fixed_jurisdiction,
+                        };
+                        let res =
+                            ProcessedGenericFiling::process_from(f_raw, f_cached, filing_index_data)
+                                .await;
+                        let Ok(val) = res;
+                        val
+                    });
+            let results = join_all(processed_filings_futures).await;
+            tracing::info!(
+                total_processed = results.len(),
+                "Completed small docket processing"
+            );
+            results
+        };
 
         fn raw_party_to_human(rawparty: RawGenericParty) -> Option<ProcessedGenericHuman> {
             let raw_name = &*rawparty.name;
@@ -216,10 +291,12 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
         for party in processed_parties.iter_mut() {
             let _res = associate_individual_author_with_name(party, fixed_jurisdiction, pool).await;
         }
-        assert_eq!(
-            raw_parties_length,
-            processed_parties.len(),
-            "raw parties should have the same length as the final parties"
+        // Note: processed_parties may be fewer than raw_parties due to filtering
+        // Only human parties are kept, so this assertion is removed
+        tracing::info!(
+            raw_count = raw_parties_length,
+            processed_count = processed_parties.len(),
+            "Party processing completed"
         );
         processed_filings.sort_by_key(|v| v.index_in_docket);
         let llmed_petitioner_list = split_and_fix_organization_names_blob(&input.petitioner).await;
@@ -252,8 +329,10 @@ enum ProcessError {
     PostgresError,
 }
 
-// TODO: Might be a good idea to have a semaphore for each
-static GLOBAL_SIMULTANEOUS_FILE_PROCESSING: Semaphore = Semaphore::const_new(50);
+// Semaphore to limit concurrent file processing to prevent resource exhaustion
+static GLOBAL_SIMULTANEOUS_FILE_PROCESSING: Semaphore = Semaphore::const_new(25);
+// Semaphore to limit concurrent LLM calls
+pub(crate) static GLOBAL_SIMULTANEOUS_LLM_CALLS: Semaphore = Semaphore::const_new(10);
 
 fn processed_human_from_blob_name(name: &str) -> Option<ProcessedGenericHuman> {
     // Trim and ensure the name isn't empty
@@ -294,6 +373,16 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
         index_data: Self::ExtraData,
     ) -> Result<Self, Self::ParseError> {
         let _permit = GLOBAL_SIMULTANEOUS_FILE_PROCESSING.acquire().await.unwrap();
+
+        tracing::info!(
+            filing_index = index_data.index,
+            filing_id = %input.filing_govid,
+            attachments_count = input.attachments.len(),
+            org_authors_count = input.organization_authors.len(),
+            org_blob_length = input.organization_authors_blob.len(),
+            individual_authors_count = input.individual_authors.len(),
+            "Processing filing"
+        );
         let object_uuid = cached
             .as_ref()
             .map(|v| v.object_uuid)
@@ -347,6 +436,11 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             if let Some(org_authors) = cached_orgauthorlist {
                 org_authors
             } else if input.organization_authors.is_empty() {
+                tracing::info!(
+                    filing_index = index_data.index,
+                    org_blob_length = input.organization_authors_blob.len(),
+                    "Processing org authors with LLM"
+                );
                 split_and_fix_organization_names_blob(&input.organization_authors_blob).await
             } else {
                 clean_up_organization_name_list(input.organization_authors)
@@ -369,6 +463,13 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
         let fixed_jur = index_data.jurisdiction;
         let pool = get_dokito_pool().await.unwrap();
 
+        tracing::info!(
+            filing_index = index_data.index,
+            org_authors_final = organization_authors.len(),
+            individual_authors_final = individual_authors.len(),
+            "Starting DB author association"
+        );
+
         let org_futures = organization_authors
             .iter_mut()
             .map(|org| associate_organization_with_name(org, fixed_jur, pool));
@@ -376,6 +477,11 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             .iter_mut()
             .map(|human| associate_individual_author_with_name(human, fixed_jur, pool));
         let _res = join!(join_all(org_futures), join_all(human_futures));
+
+        tracing::info!(
+            filing_index = index_data.index,
+            "Completed filing processing"
+        );
 
         let proc_filing = Self {
             object_uuid,
