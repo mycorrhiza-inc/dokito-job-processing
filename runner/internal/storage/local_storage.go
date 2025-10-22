@@ -35,16 +35,6 @@ type CannonicalLocalPath interface {
 	GenerateCannonicalLocalPath() string
 }
 
-// SaveJSONToPath saves a JSON object to the specified file path
-func SaveJSONToPath(path string, data any) error {
-	return WriteJSONToPath(context.Background(), path, data)
-}
-
-// RetriveJSONFromPath retrieves a JSON object from the specified file path
-func RetriveJSONFromPath(path string, target any) error {
-	return ReadJSONFromPath(context.Background(), path, target)
-}
-
 // WriteJSON marshals data to JSON and writes it using a CannonicalLocalPath
 func WriteJSON(ctx context.Context, pathProvider CannonicalLocalPath, data any) error {
 	path := pathProvider.GenerateCannonicalLocalPath()
@@ -52,7 +42,7 @@ func WriteJSON(ctx context.Context, pathProvider CannonicalLocalPath, data any) 
 }
 
 // ReadJSON reads and unmarshals JSON using a CannonicalLocalPath
-func ReadJSON(ctx context.Context, pathProvider CannonicalLocalPath, target *any) error {
+func ReadJSON[T any](ctx context.Context, pathProvider CannonicalLocalPath, target *T) error {
 	path := pathProvider.GenerateCannonicalLocalPath()
 	return ReadJSONFromPath(ctx, path, target)
 }
@@ -109,7 +99,7 @@ func ReadBytesFromPath(ctx context.Context, path string) ([]byte, error) {
 }
 
 // ReadJSONFromPath reads and unmarshals JSON from the specified file path
-func ReadJSONFromPath(ctx context.Context, path string, target any) error {
+func ReadJSONFromPath[T any](ctx context.Context, path string, target *T) error {
 	data, err := ReadBytesFromPath(ctx, path)
 	if err != nil {
 		return err

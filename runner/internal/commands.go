@@ -43,11 +43,14 @@ func PrintUsage() {
 	fmt.Println("Dokito CLI - Debug tool for the job processing pipeline")
 	fmt.Println("")
 	fmt.Println("Usage:")
-	fmt.Println("  dokito-cli pipeline <gov_id>    - Run the full pipeline")
-	fmt.Println("  dokito-cli scrape <gov_id>      - Run scraper only and print results")
-	fmt.Println("  dokito-cli process <json_file>  - Run processing only on JSON file")
-	fmt.Println("  dokito-cli upload <json_file>   - Run upload only on JSON file")
-	fmt.Println("  dokito-cli env                  - Show environment configuration")
+	fmt.Println("  dokito-cli pipeline <gov_id> [--from-remote]  - Run the full pipeline")
+	fmt.Println("  dokito-cli scrape <gov_id>                    - Run scraper only and print results")
+	fmt.Println("  dokito-cli process <json_file>                - Run processing only on JSON file")
+	fmt.Println("  dokito-cli upload <json_file>                 - Run upload only on JSON file")
+	fmt.Println("  dokito-cli env                                - Show environment configuration")
+	fmt.Println("")
+	fmt.Println("Options:")
+	fmt.Println("  --from-remote                                 - Skip scraping, retrieve data from S3 instead")
 	fmt.Println("  dokito-cli help                 - Show this help message")
 	fmt.Println("")
 	fmt.Println("Examples:")
@@ -59,15 +62,22 @@ func PrintUsage() {
 func RunPipeline() {
 	if len(os.Args) < 3 {
 		fmt.Println("Error: gov_id required")
-		fmt.Println("Usage: dokito-cli pipeline <gov_id>")
+		fmt.Println("Usage: dokito-cli pipeline <gov_id> [--from-remote]")
 		os.Exit(1)
 	}
 
 	govID := strings.TrimSpace(os.Args[2])
 
+	// Check for --from-remote flag
+	fromRemote := false
+	if len(os.Args) > 3 && os.Args[3] == "--from-remote" {
+		fromRemote = true
+	}
+
 	// Execute the shared NY PUC pipeline with debug mode enabled for CLI
 	config := pipelines.NYPUCPipelineConfig{
-		DebugMode: true, // Enable debug mode for CLI usage
+		DebugMode:  true, // Enable debug mode for CLI usage
+		FromRemote: fromRemote, // Use remote data if specified
 	}
 	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(govID, config)
 	if err != nil {

@@ -64,6 +64,18 @@ func NewOpenscrapersBucketLocation(key string) (S3Location, error) {
 	}, nil
 }
 
+func ReadS3Json[T any](ctx context.Context, pathGenerator CannonicalS3Path, target *T) error {
+	s3Loc := pathGenerator.GenerateCannonicalS3Path()
+	err := ReadS3LocationJSON(ctx, s3Loc, target)
+	return err
+}
+
+func WriteS3Json(ctx context.Context, pathGenerator CannonicalS3Path, data any) error {
+	s3Loc := pathGenerator.GenerateCannonicalS3Path()
+	err := s3Loc.WriteJSON(ctx, data)
+	return err
+}
+
 func (loc S3Location) WriteJSON(ctx context.Context, data any) error {
 	jsonData, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -144,7 +156,7 @@ func (loc S3Location) ReadBytes(ctx context.Context) ([]byte, error) {
 	return data, nil
 }
 
-func (loc S3Location) ReadJSON(ctx context.Context, target any) error {
+func ReadS3LocationJSON[T any](ctx context.Context, loc S3Location, target *T) error {
 	data, err := loc.ReadBytes(ctx)
 	if err != nil {
 		return err
@@ -180,5 +192,17 @@ func WriteJSONToLocalAndRemote(ctx context.Context, pathProvider CannonicalLocal
 		return fmt.Errorf("failed to save to remote storage: %v", remoteErr)
 	}
 
+	return nil
+}
+
+func RetriveJSONFromRemoteAndUpdateLocal[T any](ctx context.Context, pathProvider CannonicalLocalAndRemote, target *T) error {
+	err := ReadS3Json(ctx, pathProvider, target)
+	if err != nil {
+		return err
+	}
+	err = WriteJSON(ctx, pathProvider, *target)
+	if err != nil {
+		return err
+	}
 	return nil
 }

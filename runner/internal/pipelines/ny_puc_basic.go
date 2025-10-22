@@ -11,7 +11,8 @@ import (
 
 // NYPUCPipelineConfig contains configuration options for pipeline execution
 type NYPUCPipelineConfig struct {
-	DebugMode bool // Enable real-time subprocess output streaming
+	DebugMode  bool // Enable real-time subprocess output streaming
+	FromRemote bool // Skip scraping and retrieve data from S3 instead
 }
 
 // NYPUCPipelineResult contains the results from the NY PUC pipeline execution
@@ -63,47 +64,79 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 		ScraperType: string(scraperType),
 	}
 
-	// Step 1: Execute scraper in ALL mode
-	log.Printf("📝 Step 1/4: Running scraper for %s", govID)
+	// Step 1: Get raw data (either scrape or retrieve from remote)
 	var scrapeResults []map[string]any
 	var err error
+	ctx := context.Background()
 
-	if config.DebugMode {
-		log.Printf("🐛 Debug mode enabled - streaming subprocess output")
-		scrapeResults, err = core.ExecuteScraperWithALLModeDebug(govID, scraperType, scraperPaths)
+	if config.FromRemote {
+		log.Printf("☁️ Step 1/4: Retrieving raw data from remote storage for %s", govID)
+		rawLocation := storage.RawDocketLocation{
+			JurisdictionInfo: storage.NypucJurisdictionInfo,
+			DocketGovID:      govID,
+		}
+
+		var rawData map[string]any
+		if err := storage.RetriveJSONFromRemoteAndUpdateLocal(ctx, rawLocation, &rawData); err != nil {
+			return result, NYPUCPipelineError{
+				Step:    "Remote Data Retrieval",
+				Message: "failed to retrieve raw data from remote storage",
+				Err:     err,
+			}
+		}
+
+		scrapeResults = []map[string]any{rawData}
+
+		log.Printf("✅ Retrieved %d results from remote storage", len(scrapeResults))
 	} else {
-		scrapeResults, err = core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
-	}
+		log.Printf("📝 Step 1/4: Running scraper for %s", govID)
 
-	if err != nil {
-		return result, NYPUCPipelineError{
-			Step:    "Scraping",
-			Message: "scraper execution failed",
-			Err:     err,
+		if config.DebugMode {
+			log.Printf("🐛 Debug mode enabled - streaming subprocess output")
+			scrapeResults, err = core.ExecuteScraperWithALLModeDebug(govID, scraperType, scraperPaths)
+		} else {
+			scrapeResults, err = core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
+		}
+
+		if err != nil {
+			return result, NYPUCPipelineError{
+				Step:    "Scraping",
+				Message: "scraper execution failed",
+				Err:     err,
+			}
+		}
+
+		log.Printf("✅ Scraper completed. Found %d results", len(scrapeResults))
+
+		// Step 1.5: Save raw data to both local and remote locations
+		log.Printf("💾 Step 1.5/4: Saving raw scraped data to local and remote storage")
+		for _, scrapeResult := range scrapeResults {
+			scrapeGovid, err := storage.TryAndExtractGovid(scrapeResult)
+			if err != nil {
+				return result, NYPUCPipelineError{
+					Step:    "Raw Data Storage",
+					Message: "Data did not have an associated govid",
+					Err:     err,
+				}
+			}
+			rawLocation := storage.RawDocketLocation{
+				JurisdictionInfo: storage.NypucJurisdictionInfo,
+				DocketGovID:      scrapeGovid,
+			}
+			if err := storage.WriteJSONToLocalAndRemote(ctx, rawLocation, scrapeResults); err != nil {
+				return result, NYPUCPipelineError{
+					Step:    "Raw Data Storage",
+					Message: "failed to save raw data to local and remote storage",
+					Err:     err,
+				}
+			}
+
+			log.Printf("✅ Raw data saved to both local and remote storage")
 		}
 	}
 
 	result.ScrapeResults = scrapeResults
 	result.ScrapeCount = len(scrapeResults)
-	log.Printf("✅ Scraper completed. Found %d results", len(scrapeResults))
-
-	// Step 1.5: Save raw data to both local and remote locations
-	log.Printf("💾 Step 1.5/4: Saving raw scraped data to local and remote storage")
-	rawLocation := storage.RawDocketLocation{
-		JurisdictionInfo: storage.NypucJurisdictionInfo,
-		DocketGovID:      govID,
-	}
-
-	ctx := context.Background()
-	if err := storage.WriteJSONToLocalAndRemote(ctx, rawLocation, scrapeResults); err != nil {
-		return result, NYPUCPipelineError{
-			Step:    "Raw Data Storage",
-			Message: "failed to save raw data to local and remote storage",
-			Err:     err,
-		}
-	}
-
-	log.Printf("✅ Raw data saved to both local and remote storage")
 
 	// Step 2: Validate and process data
 	log.Printf("🔧 Step 2/4: Processing scraped data")
@@ -137,20 +170,31 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 
 	// Step 2.5: Save processed data to both local and remote locations
 	log.Printf("💾 Step 2.5/4: Saving processed data to local and remote storage")
-	processedLocation := storage.ProcessedDocketLocation{
-		JurisdictionInfo: storage.NypucJurisdictionInfo,
-		DocketGovID:      govID,
-	}
 
-	if err := storage.WriteJSONToLocalAndRemote(ctx, processedLocation, processedResults); err != nil {
-		return result, NYPUCPipelineError{
-			Step:    "Processed Data Storage",
-			Message: "failed to save processed data to local and remote storage",
-			Err:     err,
+	for _, processedResult := range processedResults {
+		processedGovid, err := storage.TryAndExtractGovid(processedResult)
+		if err != nil {
+			return result, NYPUCPipelineError{
+				Step:    "Processed Data Storage",
+				Message: "Data did not have an associated govid",
+				Err:     err,
+			}
 		}
-	}
+		processedLocation := storage.ProcessedDocketLocation{
+			JurisdictionInfo: storage.NypucJurisdictionInfo,
+			DocketGovID:      processedGovid,
+		}
 
-	log.Printf("✅ Processed data saved to both local and remote storage")
+		if err := storage.WriteJSONToLocalAndRemote(ctx, processedLocation, processedResults); err != nil {
+			return result, NYPUCPipelineError{
+				Step:    "Processed Data Storage",
+				Message: "failed to save processed data to local and remote storage",
+				Err:     err,
+			}
+		}
+
+		log.Printf("✅ Processed data saved to both local and remote storage")
+	}
 
 	// Step 3: Upload results
 	log.Printf("📤 Step 3/4: Uploading processed data")
