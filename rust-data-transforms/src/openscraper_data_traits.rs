@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 
-use chrono::{NaiveDate, Utc};
 use crate::types::processed::ProcessedGenericHuman;
 use crate::types::raw::{RawArtificalPersonType, RawGenericParty};
+use chrono::{NaiveDate, Utc};
 use futures::future::join_all;
 use futures::join;
 use futures_util::{StreamExt, stream};
@@ -255,6 +255,36 @@ enum ProcessError {
 // TODO: Might be a good idea to have a semaphore for each
 static GLOBAL_SIMULTANEOUS_FILE_PROCESSING: Semaphore = Semaphore::const_new(50);
 
+fn processed_human_from_blob_name(name: &str) -> Option<ProcessedGenericHuman> {
+    // Trim and ensure the name isn't empty
+    let trimmed = name.trim();
+    let nonempty_name = NonEmptyString::try_from(trimmed).ok()?;
+
+    // Split by whitespace
+    let mut parts = trimmed.split_whitespace();
+    let first = parts.next().unwrap_or("");
+    let last = parts.next().unwrap_or("");
+
+    // If there is only one part, treat both as empty
+    let (first_name, last_name) = if last.is_empty() {
+        ("".to_string(), "".to_string())
+    } else {
+        (first.to_string(), last.to_string())
+    };
+
+    Some(ProcessedGenericHuman {
+        human_name: nonempty_name,
+        contact_emails: Vec::new(),
+        contact_phone_numbers: Vec::new(),
+        contact_addresses: Vec::new(),
+        object_uuid: Uuid::nil(),
+        representing_company: None,
+        western_first_name: first_name,
+        western_last_name: last_name,
+        employed_by: None,
+        title: "".to_string(),
+    })
+}
 impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
     type ParseError = Infallible;
     type ExtraData = IndexExtraData;
@@ -324,13 +354,16 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
         };
 
         let mut individual_authors = {
-            if let Some(individual_authors) = cached_individualauthorllist {
-                individual_authors
+            if let Some(cached_authors) = cached_individualauthorllist {
+                cached_authors
             } else if input.individual_authors.is_empty() {
                 vec![]
             } else {
-                tracing::error!("Individual author logic not implemented due to corrupted data.");
-                vec![]
+                input
+                    .individual_authors
+                    .iter()
+                    .filter_map(|name| processed_human_from_blob_name(name))
+                    .collect()
             }
         };
         let fixed_jur = index_data.jurisdiction;
