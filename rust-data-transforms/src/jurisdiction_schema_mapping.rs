@@ -1,4 +1,4 @@
-use crate::types::jurisdictions::JurisdictionInfo;
+use crate::types::raw::JurisdictionInfo;
 use clap::ValueEnum;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

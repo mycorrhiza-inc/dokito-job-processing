@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::jurisdictions::JurisdictionInfo;
+use crate::types::raw::JurisdictionInfo;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, JsonSchema)]
 pub enum AttachmentTextQuality {

@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use crate::types::{
     env_vars::DIGITALOCEAN_S3,
-    jurisdictions::JurisdictionInfo,
+    raw::JurisdictionInfo,
     processed::{ProcessedGenericDocket, ProcessedGenericFiling, ProcessedGenericOrganization},
     raw::RawGenericDocket,
     s3_stuff::{DocketAddress, list_raw_cases_for_jurisdiction},

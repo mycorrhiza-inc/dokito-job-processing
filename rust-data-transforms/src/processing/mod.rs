@@ -4,7 +4,7 @@ use crate::data_processing_traits::{
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::attachments::OpenscrapersExtraData;
 use crate::s3_stuff::{DocketAddress, download_openscrapers_object, make_s3_client, upload_object};
-use crate::types::jurisdictions::JurisdictionInfo;
+use crate::types::raw::JurisdictionInfo;
 use crate::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
 use crate::types::raw::RawGenericDocket;
 use async_trait::async_trait;

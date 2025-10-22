@@ -1,5 +1,5 @@
 use crate::types::processed::ProcessedGenericDocket;
-use openscraper_types::raw::RawGenericDocket;
+use crate::types::raw::RawGenericDocket;
 use serde::Deserialize;
 
 #[derive(Clone, Deserialize, Debug)]

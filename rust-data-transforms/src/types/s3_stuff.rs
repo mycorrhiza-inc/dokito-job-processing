@@ -10,7 +10,7 @@ use tracing::{debug, info};
 
 use crate::attachments::RawAttachment;
 use crate::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
-use crate::jurisdictions::JurisdictionInfo;
+use crate::raw::JurisdictionInfo;
 use crate::processed::ProcessedGenericDocket;
 use aws_sdk_s3::Client as S3Client;
 use mycorrhiza_common::hash::Blake2bHash;
@@ -34,7 +34,30 @@ impl CannonicalS3ObjectLocation for RawAttachment {
     }
 }
 
-pub use openscraper_types::s3_stuff::DocketAddress;
+pub struct DocketAddress {
+    pub docket_govid: String,
+    pub jurisdiction: JurisdictionInfo,
+}
+
+use crate::raw::RawGenericDocket;
+
+impl CannonicalS3ObjectLocation for RawGenericDocket {
+    type AddressInfo = DocketAddress;
+
+    fn generate_object_key(addr: &Self::AddressInfo) -> String {
+        let country = &*addr.jurisdiction.country;
+        let state = &*addr.jurisdiction.state;
+        let jurisdiction = &*addr.jurisdiction.jurisdiction;
+        let case_name = &*addr.docket_govid;
+        format!("objects_raw/{country}/{state}/{jurisdiction}/{case_name}")
+    }
+    fn generate_bucket(_: &Self::AddressInfo) -> &'static str {
+        &OPENSCRAPERS_S3_OBJECT_BUCKET
+    }
+    fn get_credentials(_: &Self::AddressInfo) -> &'static S3Credentials {
+        &DIGITALOCEAN_S3
+    }
+}
 impl CannonicalS3ObjectLocation for ProcessedGenericDocket {
     type AddressInfo = DocketAddress;
 

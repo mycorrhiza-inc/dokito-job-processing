@@ -2494,50 +2494,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
-name = "openscraper_types"
-version = "0.1.0"
-source = "git+https://github.com/open-pucs/scrapers/#960993e3e217e69267eb0eb133a4cfff1ee5865a"
-dependencies = [
- "aide",
- "anyhow",
- "async-trait",
- "aws-config",
- "aws-sdk-s3",
- "axum",
- "axum-tracing-opentelemetry",
- "base64 0.22.1",
- "blake2",
- "chrono",
- "futures-util",
- "hex",
- "hostname",
- "hyper 1.7.0",
- "init-tracing-opentelemetry",
- "mycorrhiza_common",
- "non-empty-string",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry-stdout",
- "opentelemetry_sdk",
- "rand 0.9.2",
- "rand_core 0.9.3",
- "reqwest",
- "rkyv",
- "schemars 0.9.0",
- "serde",
- "serde_json",
- "serde_with",
- "thiserror",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "url",
- "urlencoding",
-]
-
-[[package]]
 name = "openssl"
 version = "0.10.73"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3239,7 +3195,6 @@ dependencies = [
  "hex",
  "mycorrhiza_common",
  "non-empty-string",
- "openscraper_types",
  "rand 0.9.2",
  "rand_core 0.9.3",
  "reqwest",

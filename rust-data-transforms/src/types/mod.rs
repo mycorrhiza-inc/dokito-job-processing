@@ -7,5 +7,5 @@ pub mod raw;
 pub mod s3_stuff;
 
 pub mod jurisdictions {
-    pub use openscraper_types::jurisdictions::*;
+    pub use crate::raw::JurisdictionInfo;
 }

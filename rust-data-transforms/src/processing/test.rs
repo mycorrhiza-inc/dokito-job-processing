@@ -1,7 +1,7 @@
 // use std::collections::HashMap;
 //
 // use crate::s3_stuff::make_s3_client;
-// use crate::types::jurisdictions::JurisdictionInfo;
+// use crate::types::raw::JurisdictionInfo;
 // use crate::types::raw::{
 //     RawDocketWithJurisdiction, RawGenericAttachment, RawGenericDocket, RawGenericFiling,
 // };

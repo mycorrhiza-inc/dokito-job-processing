@@ -7,7 +7,7 @@ use crate::s3_stuff::{
     push_raw_attach_file_to_s3, upload_object,
 };
 use crate::types::processed::ProcessedGenericAttachment;
-use crate::types::{attachments::RawAttachment, jurisdictions::JurisdictionInfo};
+use crate::types::{attachments::RawAttachment, raw::JurisdictionInfo};
 use aws_sdk_s3::Client as S3Client;
 use chrono::Utc;
 use mycorrhiza_common::file_extension::FileExtension;
