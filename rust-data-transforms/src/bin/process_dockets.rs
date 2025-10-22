@@ -3,6 +3,7 @@ use clap::Parser;
 use rust_data_transforms::cli_input_types::CliRawDockets;
 use rust_data_transforms::data_processing_traits::ProcessFrom;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
+use rust_data_transforms::sql_ingester_tasks::redis_author_cache::init_redis_client;
 use rust_data_transforms::types::processed::ProcessedGenericDocket;
 use serde_json;
 use std::io::{self, Read, Write};
@@ -22,6 +23,11 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .with_max_level(tracing::Level::INFO)
         .init();
+
+    // Initialize Redis cache early
+    if let Err(e) = init_redis_client().await {
+        tracing::warn!("Redis initialization failed: {}, continuing with database-only mode", e);
+    }
 
     let cli = Cli::parse();
 

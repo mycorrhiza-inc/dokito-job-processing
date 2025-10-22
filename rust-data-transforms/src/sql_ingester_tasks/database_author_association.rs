@@ -5,6 +5,10 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
+use crate::sql_ingester_tasks::redis_author_cache::{
+    cache_human, cache_organization, get_cached_human,
+    get_cached_organization, CachedHuman, CachedOrganization,
+};
 use anyhow::Result;
 
 #[derive(FromRow, Clone)]
@@ -25,6 +29,99 @@ struct OrganizationRecord {
     // description: Option<String>,
     // artifical_person_type: Option<String>,
     // org_suffix: Option<String>,
+}
+
+/// Cache-first version of human author association
+pub async fn associate_individual_author_with_name_cached(
+    individual: &mut ProcessedGenericHuman,
+    fixed_jur: FixedJurisdiction,
+    pool: &PgPool,
+) -> Result<()> {
+    let human_name = individual.human_name.as_str().to_string();
+
+    // Step 1: Check cache first
+    if let Some(cached_human) = get_cached_human(&human_name, fixed_jur).await {
+        individual.object_uuid = cached_human.uuid;
+        individual.western_first_name = cached_human.western_first_name;
+        individual.western_last_name = cached_human.western_last_name;
+        individual.contact_emails = cached_human.contact_emails;
+        individual.contact_phone_numbers = cached_human.contact_phone_numbers;
+        tracing::debug!("Using cached human: {}", human_name);
+        return Ok(());
+    }
+
+    // Step 2: Cache miss - fall back to database lookup with deduplication
+    let result_uuid = associate_individual_author_with_name_db_only(individual, fixed_jur, pool).await?;
+
+    // Step 3: Cache the result
+    let cached_human = CachedHuman {
+        uuid: result_uuid,
+        western_first_name: individual.western_first_name.clone(),
+        western_last_name: individual.western_last_name.clone(),
+        contact_emails: individual.contact_emails.clone(),
+        contact_phone_numbers: individual.contact_phone_numbers.clone(),
+    };
+
+    let _ = cache_human(&cached_human, &human_name, fixed_jur).await;
+
+    Ok(())
+}
+
+/// Database-only version (original logic) for cache misses
+async fn associate_individual_author_with_name_db_only(
+    individual: &mut ProcessedGenericHuman,
+    fixed_jur: FixedJurisdiction,
+    pool: &PgPool,
+) -> Result<Uuid> {
+    let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    // Step 1: Try match by UUID
+    if !individual.object_uuid.is_nil() {
+        let author_id = individual.object_uuid;
+        let result = query_as::<_, HumanRecord>(&format!(
+            "SELECT uuid, western_first_name, western_last_name, contact_emails, contact_phone_numbers \
+             FROM {pg_schema}.humans WHERE uuid=$1"
+        ))
+        .bind(author_id)
+        .fetch_optional(pool)
+        .await?;
+
+        if let Some(matched_record) = result
+            && matched_record.western_first_name == individual.western_first_name
+            && matched_record.western_last_name == individual.western_last_name
+        {
+            individual.object_uuid = matched_record.uuid;
+            return Ok(matched_record.uuid);
+        }
+    }
+
+    // Step 2: Match (and possibly deduplicate) by full name
+    if let Some(found_uuid) = find_and_merge_humans_by_name(individual, &pg_schema, pool).await? {
+        individual.object_uuid = found_uuid;
+        return Ok(found_uuid);
+    }
+
+    // Step 3: Insert new record
+    let mut provisional_uuid = individual.object_uuid;
+    if provisional_uuid.is_nil() {
+        provisional_uuid = Uuid::new_v4();
+        individual.object_uuid = provisional_uuid;
+    }
+
+    sqlx::query(&format!(
+        "INSERT INTO {pg_schema}.humans (uuid, name, western_first_name, western_last_name, contact_emails, contact_phone_numbers) \
+         VALUES ($1, $2, $3, $4, $5, $6)"
+    ))
+    .bind(provisional_uuid)
+    .bind(individual.human_name.as_str())
+    .bind(&individual.western_first_name)
+    .bind(&individual.western_last_name)
+    .bind(&individual.contact_emails)
+    .bind(&individual.contact_phone_numbers)
+    .execute(pool)
+    .await?;
+
+    Ok(provisional_uuid)
 }
 
 pub async fn associate_individual_author_with_name(
@@ -155,6 +252,92 @@ async fn find_and_merge_humans_by_name(
 // ORGANIZATIONS
 // -----------------------------------------------------------------------------
 
+/// Cache-first version of organization author association
+pub async fn associate_organization_with_name_cached(
+    org: &mut ProcessedGenericOrganization,
+    fixed_jur: FixedJurisdiction,
+    pool: &PgPool,
+) -> Result<()> {
+    let org_name = org.truncated_org_name.as_str().to_string();
+
+    // Step 1: Check cache first
+    if let Some(cached_org) = get_cached_organization(&org_name, fixed_jur).await {
+        org.object_uuid = cached_org.uuid;
+        tracing::debug!("Using cached organization: {}", org_name);
+        return Ok(());
+    }
+
+    // Step 2: Cache miss - fall back to database lookup with deduplication
+    let result_uuid = associate_organization_with_name_db_only(org, fixed_jur, pool).await?;
+
+    // Step 3: Cache the result
+    let cached_org = CachedOrganization {
+        uuid: result_uuid,
+        name: org.truncated_org_name.to_string(),
+    };
+
+    let _ = cache_organization(&cached_org, &org_name, fixed_jur).await;
+
+    Ok(())
+}
+
+/// Database-only version (original logic) for cache misses
+async fn associate_organization_with_name_db_only(
+    org: &mut ProcessedGenericOrganization,
+    fixed_jur: FixedJurisdiction,
+    pool: &PgPool,
+) -> Result<Uuid> {
+    let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    // Step 1: Try by UUID
+    if !org.object_uuid.is_nil() {
+        let org_id = org.object_uuid;
+        let result = query_as::<_, OrganizationRecord>(&format!(
+            "SELECT uuid, name FROM {pg_schema}.organizations WHERE uuid=$1"
+        ))
+        .bind(org_id)
+        .fetch_optional(pool)
+        .await?;
+
+        if let Some(matched_record) = result
+            && matched_record.name == org.truncated_org_name
+        {
+            org.object_uuid = matched_record.uuid;
+            return Ok(matched_record.uuid);
+        }
+    }
+
+    // Step 2: Match (and deduplicate) by org name
+    if let Some(found_uuid) = find_and_merge_orgs_by_name(org, &pg_schema, pool).await? {
+        org.object_uuid = found_uuid;
+        return Ok(found_uuid);
+    }
+
+    // Step 3: Insert new record
+    let mut provisional_uuid = org.object_uuid;
+    if provisional_uuid.is_nil() {
+        provisional_uuid = Uuid::new_v4();
+        org.object_uuid = provisional_uuid;
+    }
+
+    let org_type = org.org_type.to_string();
+
+    sqlx::query(&format!(
+        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, artifical_person_type, org_suffix) \
+         VALUES ($1, $2, $3, $4, $5, $6)"
+    ))
+    .bind(provisional_uuid)
+    .bind(org.truncated_org_name.as_str())
+    .bind(vec![org.truncated_org_name.to_string()])
+    .bind("")
+    .bind(&org_type)
+    .bind(&org.org_suffix)
+    .execute(pool)
+    .await?;
+
+    Ok(provisional_uuid)
+}
+
 pub async fn associate_organization_with_name(
     org: &mut ProcessedGenericOrganization,
     fixed_jur: FixedJurisdiction,
@@ -263,7 +446,7 @@ pub async fn upload_docket_party_human_connection(
         bail!("Uploading docket must have a non nil uuid.")
     }
 
-    associate_individual_author_with_name(upload_party, fixed_jur, pool).await?;
+    associate_individual_author_with_name_cached(upload_party, fixed_jur, pool).await?;
 
     if upload_party.object_uuid.is_nil() {
         unreachable!(
@@ -305,7 +488,7 @@ pub async fn upload_docket_petitioner_org_connection(
     if parent_docket_uuid.is_nil() {
         bail!("Uploading filing must have a non nil uuid.")
     }
-    associate_organization_with_name(upload_petitioner, fixed_jur, pool).await?;
+    associate_organization_with_name_cached(upload_petitioner, fixed_jur, pool).await?;
     if upload_petitioner.object_uuid.is_nil() {
         unreachable!(
             "Uploading filing author must have a non nil uuid. This should be impossible because it just happened in the previous step"
@@ -332,7 +515,7 @@ pub async fn upload_filing_organization_author(
     if parent_filing_uuid.is_nil() {
         bail!("Uploading filing must have a non nil uuid.")
     }
-    associate_organization_with_name(upload_org_author, fixed_jur, pool).await?;
+    associate_organization_with_name_cached(upload_org_author, fixed_jur, pool).await?;
     if upload_org_author.object_uuid.is_nil() {
         unreachable!(
             "Uploading filing author must have a non nil uuid. This should be impossible because it just happened in the previous step"
@@ -360,7 +543,7 @@ pub async fn upload_filing_human_author(
     if parent_filing_uuid.is_nil() {
         bail!("Uploading filing must have a non nil uuid.")
     }
-    associate_individual_author_with_name(upload_author, fixed_jur, pool).await?;
+    associate_individual_author_with_name_cached(upload_author, fixed_jur, pool).await?;
     if upload_author.object_uuid.is_nil() {
         unreachable!(
             "Uploading filing author must have a non nil uuid, this should be impossible dispite it being validated on the previous line."

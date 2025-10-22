@@ -58,3 +58,5 @@ rkyv = { version = "0.8.11", features = ["aligned", "alloc"] }
 
 sqlx = { version = "0.8", features = ["chrono", "json", "postgres", "runtime-tokio", "tls-native-tls", "uuid"] }
 futures = "0.3.31"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+sha2 = "0.10"

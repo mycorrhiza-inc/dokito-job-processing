@@ -22,8 +22,9 @@ use crate::processing::match_raw_processed::{
     match_raw_attaches_to_processed_attaches, match_raw_filings_to_processed_filings,
 };
 use crate::sql_ingester_tasks::database_author_association::{
-    associate_individual_author_with_name, associate_organization_with_name,
+    associate_individual_author_with_name_cached, associate_organization_with_name_cached,
 };
+use crate::sql_ingester_tasks::redis_author_cache::init_redis_client;
 use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use crate::types::processed::{
     ProcessedGenericAttachment, ProcessedGenericDocket, ProcessedGenericFiling,
@@ -287,10 +288,15 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
         tracing::info!(case_parties_length = %processed_parties.len(),"Processed parties has final length");
         let pool = get_dokito_pool().await.unwrap();
 
-        // TODO: This could be made concurrent if its a bottleneck
-        for party in processed_parties.iter_mut() {
-            let _res = associate_individual_author_with_name(party, fixed_jurisdiction, pool).await;
-        }
+        // Initialize Redis cache if not already done
+        let _ = init_redis_client().await;
+
+        // Concurrent processing of parties using cached lookups
+        tracing::info!("Starting concurrent party processing with Redis cache");
+        let party_futures = processed_parties
+            .iter_mut()
+            .map(|party| associate_individual_author_with_name_cached(party, fixed_jurisdiction, pool));
+        let _party_results = join_all(party_futures).await;
         // Note: processed_parties may be fewer than raw_parties due to filtering
         // Only human parties are kept, so this assertion is removed
         tracing::info!(
@@ -472,10 +478,10 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
 
         let org_futures = organization_authors
             .iter_mut()
-            .map(|org| associate_organization_with_name(org, fixed_jur, pool));
+            .map(|org| associate_organization_with_name_cached(org, fixed_jur, pool));
         let human_futures = individual_authors
             .iter_mut()
-            .map(|human| associate_individual_author_with_name(human, fixed_jur, pool));
+            .map(|human| associate_individual_author_with_name_cached(human, fixed_jur, pool));
         let _res = join!(join_all(org_futures), join_all(human_futures));
 
         tracing::info!(
