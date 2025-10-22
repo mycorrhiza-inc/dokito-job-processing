@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use crate::types::{
     env_vars::DIGITALOCEAN_S3,
-    jurisdictions::JurisdictionInfo,
+    raw::JurisdictionInfo,
     processed::{ProcessedGenericDocket, ProcessedGenericFiling, ProcessedGenericOrganization},
     raw::RawGenericDocket,
     s3_stuff::{DocketAddress, list_raw_cases_for_jurisdiction},
@@ -370,20 +370,20 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
     let party_results = join_all(party_futures).await;
     bubble_error(party_results)?;
 
-    let process_filling_closure =
-        async |filling: &mut ProcessedGenericFiling| -> Result<(), anyhow::Error> {
-            let individual_author_strings = filling
+    let process_filing_closure =
+        async |filing: &mut ProcessedGenericFiling| -> Result<(), anyhow::Error> {
+            let individual_author_strings = filing
                 .individual_authors
                 .iter()
                 .map(|s| s.human_name.to_string())
                 .collect::<Vec<_>>();
-            let organization_author_strings = filling
+            let organization_author_strings = filing
                 .organization_authors
                 .iter()
                 .map(|s| s.truncated_org_name.to_string())
                 .collect::<Vec<_>>();
-            let filling_uuid: Uuid = query_scalar(
-            &format!("INSERT INTO {pg_schema}.fillings (uuid, docket_uuid, docket_govid, individual_author_strings, organization_author_strings, filed_date, filling_type, filling_name, filling_description, openscrapers_id)
+            let filing_uuid: Uuid = query_scalar(
+            &format!("INSERT INTO {pg_schema}.filings (uuid, docket_uuid, docket_govid, individual_author_strings, organization_author_strings, filed_date, filing_type, filing_name, filing_description, openscrapers_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              ON CONFLICT (uuid) DO UPDATE SET
              docket_uuid = EXCLUDED.docket_uuid,
@@ -391,51 +391,51 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
              individual_author_strings = EXCLUDED.individual_author_strings,
              organization_author_strings = EXCLUDED.organization_author_strings,
              filed_date = EXCLUDED.filed_date,
-             filling_type = EXCLUDED.filling_type,
-             filling_name = EXCLUDED.filling_name,
-             filling_description = EXCLUDED.filling_description,
+             filing_type = EXCLUDED.filing_type,
+             filing_name = EXCLUDED.filing_name,
+             filing_description = EXCLUDED.filing_description,
              openscrapers_id = EXCLUDED.openscrapers_id
              RETURNING uuid")
         )
-        .bind(filling.object_uuid)
+        .bind(filing.object_uuid)
         .bind(docket_uuid)
         .bind(case.case_govid.as_str())
         .bind(&individual_author_strings)
         .bind(&organization_author_strings)
-        .bind(filling.filed_date)
-        .bind(&filling.filing_type)
-        .bind(&filling.name)
-        .bind(&filling.description)
-        .bind(filling.object_uuid.to_string())
+        .bind(filing.filed_date)
+        .bind(&filing.filing_type)
+        .bind(&filing.name)
+        .bind(&filing.description)
+        .bind(filing.object_uuid.to_string())
         .fetch_one(pool)
         .await?;
-            if filling_uuid != filling.object_uuid {
-                info!(%filling_uuid, "Set filling to have new uuid");
-                filling.object_uuid = filling_uuid;
+            if filing_uuid != filing.object_uuid {
+                info!(%filing_uuid, "Set filing to have new uuid");
+                filing.object_uuid = filing_uuid;
             }
 
             // Associate individual authors using the proper association functions
-            for individual_author in filling.individual_authors.iter_mut() {
-                upload_filling_human_author(individual_author, filling_uuid, fixed_jur, pool)
+            for individual_author in filing.individual_authors.iter_mut() {
+                upload_filing_human_author(individual_author, filing_uuid, fixed_jur, pool)
                     .await?;
             }
 
             // Associate organization authors using the proper association functions
-            for org_author in filling.organization_authors.iter_mut() {
-                upload_filling_organization_author(org_author, filling_uuid, fixed_jur, pool)
+            for org_author in filing.organization_authors.iter_mut() {
+                upload_filing_organization_author(org_author, filing_uuid, fixed_jur, pool)
                     .await?;
             }
 
-            for attachment in filling.attachments.iter_mut() {
+            for attachment in filing.attachments.iter_mut() {
                 let hashstr = attachment
                     .hash
                     .map(|h| h.to_string())
                     .unwrap_or_else(|| "".to_string());
                 let attachment_uuid: Uuid = query_scalar(
-                &format!("INSERT INTO {pg_schema}.attachments (uuid, parent_filling_uuid, blake2b_hash, attachment_file_extension, attachment_file_name, attachment_title, attachment_url, openscrapers_id)
+                &format!("INSERT INTO {pg_schema}.attachments (uuid, parent_filing_uuid, blake2b_hash, attachment_file_extension, attachment_file_name, attachment_title, attachment_url, openscrapers_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     ON CONFLICT (uuid) DO UPDATE SET
-                    parent_filling_uuid = EXCLUDED.parent_filling_uuid,
+                    parent_filing_uuid = EXCLUDED.parent_filing_uuid,
                     blake2b_hash = EXCLUDED.blake2b_hash,
                     attachment_file_extension = EXCLUDED.attachment_file_extension,
                     attachment_file_name = EXCLUDED.attachment_file_name,
@@ -445,7 +445,7 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
                     RETURNING uuid")
             )
             .bind(attachment.object_uuid)
-            .bind(filling_uuid)
+            .bind(filing_uuid)
             .bind(hashstr)
             .bind(&*attachment.document_extension.to_string())
             .bind(&attachment.name)
@@ -462,12 +462,12 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
             Ok(())
         };
     let simultaneous_file_uploads = Semaphore::new(3);
-    let filling_futures = case.filings.iter_mut().map(async |filling| {
+    let filing_futures = case.filings.iter_mut().map(async |filing| {
         let _permit = simultaneous_file_uploads.acquire().await?;
-        process_filling_closure(filling).await
+        process_filing_closure(filing).await
     });
-    let filling_results = join_all(filling_futures).await;
-    bubble_error(filling_results.into_iter())?;
+    let filing_results = join_all(filing_futures).await;
+    bubble_error(filing_results.into_iter())?;
 
     tracing::info!(govid=%case.case_govid, uuid=%docket_uuid,"Successfully processed case with no errors");
     Ok(())

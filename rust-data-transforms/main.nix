@@ -42,5 +42,9 @@ in {
       type = "app";
       program = "${dokito-backend}/bin/download-attachments";
     };
+    database-utils = {
+      type = "app";
+      program = "${dokito-backend}/bin/database-utils";
+    };
   };
 }

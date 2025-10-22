@@ -16,6 +16,6 @@ pub use types::*;
 
 // Re-export jurisdictions for compatibility
 pub mod jurisdictions {
-    pub use openscraper_types::jurisdictions::*;
+    pub use crate::types::raw::JurisdictionInfo;
 }
 

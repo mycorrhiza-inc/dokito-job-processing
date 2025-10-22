@@ -14,7 +14,7 @@ use uuid::Uuid;
 pub struct ProcessedGenericAttachment {
     #[serde(default)]
     pub name: String,
-    pub index_in_filling: u64,
+    pub index_in_filing: u64,
     pub document_extension: FileExtension,
     #[serde(default)]
     pub object_uuid: Uuid,
@@ -112,9 +112,9 @@ pub struct ProcessedGenericFiling {
     pub filed_date: Option<NaiveDate>,
     pub index_in_docket: u64,
     #[serde(default)]
-    pub filling_govid: String,
+    pub filing_govid: String,
     #[serde(default)]
-    pub filling_url: String,
+    pub filing_url: String,
     #[serde(default)]
     pub object_uuid: Uuid,
     #[serde(default)]

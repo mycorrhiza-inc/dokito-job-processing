@@ -7,7 +7,7 @@ use tracing::{debug, info};
 
 use crate::types::attachments::RawAttachment;
 use crate::types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
-use crate::types::jurisdictions::JurisdictionInfo;
+use crate::types::raw::JurisdictionInfo;
 use crate::types::processed::ProcessedGenericDocket;
 use crate::types::raw::RawGenericDocket;
 use aws_sdk_s3::Client as S3Client;

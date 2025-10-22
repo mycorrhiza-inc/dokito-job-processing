@@ -4,7 +4,7 @@ use crate::data_processing_traits::{
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::attachments::OpenscrapersExtraData;
 use crate::s3_stuff::{DocketAddress, download_openscrapers_object, make_s3_client, upload_object};
-use crate::types::jurisdictions::JurisdictionInfo;
+use crate::types::raw::JurisdictionInfo;
 use crate::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
 use crate::types::raw::RawGenericDocket;
 use async_trait::async_trait;
@@ -43,8 +43,8 @@ pub fn make_reflist_of_attachments_without_hash(
     case: &mut ProcessedGenericDocket,
 ) -> Vec<&mut ProcessedGenericAttachment> {
     let mut case_refs = Vec::with_capacity(case.filings.len());
-    for filling in case.filings.iter_mut() {
-        for attachment in filling.attachments.iter_mut() {
+    for filing in case.filings.iter_mut() {
+        for attachment in filing.attachments.iter_mut() {
             if attachment.hash.is_none() {
                 case_refs.push(attachment);
             }

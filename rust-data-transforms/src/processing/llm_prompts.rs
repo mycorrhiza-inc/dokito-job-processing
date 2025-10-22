@@ -139,7 +139,7 @@ pub async fn guess_at_organization_type(
     OrganizationType::Unknown
 }
 
-pub async fn guess_at_filling_title<T: AsRef<str> + Serialize>(attachment_names: &[T]) -> String {
+pub async fn guess_at_filing_title<T: AsRef<str> + Serialize>(attachment_names: &[T]) -> String {
     if attachment_names.len() == 1
         && let Some(first) = attachment_names.first()
     {
@@ -150,7 +150,7 @@ pub async fn guess_at_filling_title<T: AsRef<str> + Serialize>(attachment_names:
     };
 
     let prompt = format!(
-        r#"There is a filling consisting of a bunch of attachment with names given below, come up with a good sensible guess for what the entire filling should be named. In general it should be the name of the most important filling in the attachment
+        r#"There is a filing consisting of a bunch of attachment with names given below, come up with a good sensible guess for what the entire filing should be named. In general it should be the name of the most important filing in the attachment
 ONLY RETURN THE SUGGESTED NAME RETURN NO OTHER TEXT:
 
 Example 1:
