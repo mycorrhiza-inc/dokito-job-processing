@@ -123,7 +123,7 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 				JurisdictionInfo: storage.NypucJurisdictionInfo,
 				DocketGovID:      scrapeGovid,
 			}
-			if err := storage.WriteJSONToLocalAndRemote(ctx, rawLocation, scrapeResults); err != nil {
+			if err := storage.WriteJSONToLocalAndRemote(ctx, rawLocation, scrapeResult); err != nil {
 				return result, NYPUCPipelineError{
 					Step:    "Raw Data Storage",
 					Message: "failed to save raw data to local and remote storage",
@@ -185,7 +185,7 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 			DocketGovID:      processedGovid,
 		}
 
-		if err := storage.WriteJSONToLocalAndRemote(ctx, processedLocation, processedResults); err != nil {
+		if err := storage.WriteJSONToLocalAndRemote(ctx, processedLocation, processedResult); err != nil {
 			return result, NYPUCPipelineError{
 				Step:    "Processed Data Storage",
 				Message: "failed to save processed data to local and remote storage",

@@ -268,7 +268,14 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             .as_ref()
             .map(|v| v.object_uuid)
             .unwrap_or_else(Uuid::new_v4);
-        let _pg_pool = get_dokito_pool().await.unwrap();
+        let _pg_pool = get_dokito_pool().await.unwrap_or_else(|e| {
+            eprintln!("FATAL: Failed to initialize database connection during processing");
+            eprintln!("Error: {:?}", e);
+            eprintln!("This is likely due to missing or incorrect database environment variables:");
+            eprintln!("  - POSTGRES_CONNECTION or DATABASE_URL must be set");
+            eprintln!("  - Database must be accessible and credentials must be correct");
+            panic!("Cannot proceed without database connection");
+        });
         let (processed_attach_map, cached_orgauthorlist, cached_individualauthorllist) =
             match cached {
                 Some(filling) => (

@@ -59,6 +59,27 @@
             echo "  Download: $DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"
             echo "  Current Directory: $BINARY_EXECUTION_PATH"
             echo ""
+
+            # Check database connectivity
+            echo "🔍 Checking database connectivity..."
+            if [ -n "''${DATABASE_URL:-}" ]; then
+              echo "  Database URL: Set (checking connection...)"
+              if ! ${pkgs.postgresql}/bin/psql "''${DATABASE_URL}" -c "SELECT 1;" >/dev/null 2>&1; then
+                echo "❌ Database connection failed!"
+                echo "   URL pattern: $(echo "''${DATABASE_URL}" | sed 's/:\/\/.*@/:\/\/<REDACTED>@/')"
+                echo "   This will cause processing and upload steps to fail."
+                echo "   Please check your database credentials and connectivity."
+                exit 1
+              else
+                echo "✅ Database connection successful"
+              fi
+            else
+              echo "⚠️  No DATABASE_URL environment variable set"
+              echo "   Processing and upload steps will fail without database access."
+              echo "   Set DATABASE_URL to continue."
+              exit 1
+            fi
+            echo ""
           '';
 
           # Create a wrapper that sets up environment variables for the server
