@@ -32,6 +32,7 @@ interface ScrapingOptions {
   headed?: boolean;
   missing?: boolean;
   todayFilings?: boolean;
+  intermediateDir?: string;
 }
 
 // class NyPucScraper implements Scraper {
@@ -45,11 +46,13 @@ class NyPucScraper {
   max_concurrent_browsers: number = 4;
   pageCache: Record<string, any> = {};
   urlTable: Record<string, string> = {};
+  baseDirectory: string;
 
-  constructor(page: Page, context: any, browser: Browser) {
+  constructor(page: Page, context: any, browser: Browser, baseDirectory: string) {
     this.rootPage = page;
     this.context = context;
     this.browser = browser;
+    this.baseDirectory = baseDirectory;
   }
 
   pages(): any {
@@ -119,6 +122,11 @@ class NyPucScraper {
     currentHash: string
   ): Promise<any | null> {
     try {
+      // Skip if no base directory configured
+      if (!this.baseDirectory) {
+        return null;
+      }
+
       // Parse URL to build directory path
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
@@ -129,7 +137,7 @@ class NyPucScraper {
       const directoryPath = pathParts.join('/');
 
       const fullDirectory = path.join(
-        process.cwd(),
+        this.baseDirectory,
         'raw',
         'ny',
         'puc',
@@ -151,16 +159,16 @@ class NyPucScraper {
           entry.blake2_hash === currentHash &&
           entry.parsed_data !== undefined
         ) {
-          console.log(`Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+          console.error(`Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
           return entry.parsed_data;
         }
       }
 
-      console.log(`Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+      console.error(`Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
       return null;
     } catch (error) {
       // File doesn't exist or other error - cache miss
-      console.log(`Cache MISS for ${stage} at ${url} (no metadata file)`);
+      console.error(`Cache MISS for ${stage} at ${url} (no metadata file)`);
       return null;
     }
   }
@@ -172,6 +180,11 @@ class NyPucScraper {
     parsedData: any
   ): Promise<void> {
     try {
+      // Skip if no base directory configured
+      if (!this.baseDirectory) {
+        return;
+      }
+
       // Parse URL to build directory path
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
@@ -182,7 +195,7 @@ class NyPucScraper {
       const directoryPath = pathParts.join('/');
 
       const fullDirectory = path.join(
-        process.cwd(),
+        this.baseDirectory,
         'raw',
         'ny',
         'puc',
@@ -231,7 +244,7 @@ class NyPucScraper {
           'utf-8'
         );
 
-        console.log(`Saved parsed data to cache for ${stage} at ${url}`);
+        console.error(`Saved parsed data to cache for ${stage} at ${url}`);
       } else {
         console.warn(`Could not find metadata entry to update for ${stage} at ${url}`);
       }
@@ -246,6 +259,11 @@ class NyPucScraper {
     stage: string
   ): Promise<void> {
     try {
+      // Skip if no base directory configured
+      if (!this.baseDirectory) {
+        return;
+      }
+
       // Parse URL
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
@@ -259,7 +277,7 @@ class NyPucScraper {
 
       // Build full directory path
       const fullDirectory = path.join(
-        process.cwd(),
+        this.baseDirectory,
         'raw',
         'ny',
         'puc',
@@ -294,7 +312,7 @@ class NyPucScraper {
         file_size: Buffer.byteLength(html, 'utf-8')
       });
 
-      console.log(`Saved HTML snapshot: ${fullPath}`);
+      console.error(`Saved HTML snapshot: ${fullPath}`);
     } catch (error) {
       console.error(`Failed to save HTML snapshot for ${url}:`, error);
     }
@@ -320,7 +338,7 @@ class NyPucScraper {
         const task = tasks[taskIndex];
         running++;
 
-        console.log(
+        console.error(
           `Starting task ${taskIndex + 1}/${tasks.length} (${running} running, max: ${maxConcurrent})`,
         );
 
@@ -334,7 +352,7 @@ class NyPucScraper {
         } finally {
           running--;
           completed++;
-          console.log(
+          console.error(
             `Completed task ${taskIndex + 1}/${tasks.length} (${running} still running)`,
           );
 
@@ -390,7 +408,7 @@ class NyPucScraper {
         // Wait for the loading spinner to disappear
         await this.waitForLoadingSpinner(page);
 
-        console.log(`Getting page content at ${url}...`);
+        console.error(`Getting page content at ${url}...`);
         const html = await page.content();
 
         // Save HTML snapshot if stage is provided
@@ -426,7 +444,7 @@ class NyPucScraper {
   async getDateCases(dateString: string): Promise<Partial<RawGenericDocket>[]> {
     // eg dateString = 09/09/2025
     const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=&MT=&MST=&CN=&SDT=${dateString}&SDF=${dateString}&C=&M=&CO=0`;
-    console.log(`getting cases for date ${dateString}`);
+    console.error(`getting cases for date ${dateString}`);
     const cases: Partial<RawGenericDocket>[] = await this.getCasesAt(url);
     return cases;
   }
@@ -436,7 +454,7 @@ class NyPucScraper {
   }
 
   async getCasesAt(url: string): Promise<Partial<RawGenericDocket>[]> {
-    console.log(`Navigating to ${url}`);
+    console.error(`Navigating to ${url}`);
     const $ = await this.getPage(url, "search-results");
 
     // Calculate hash for cache check
@@ -451,7 +469,7 @@ class NyPucScraper {
 
     const cases: Partial<RawGenericDocket>[] = [];
 
-    console.log("Extracting industry affected...");
+    console.error("Extracting industry affected...");
     let industry_affected = $("#GridPlaceHolder_lblSearchCriteriaValue")
       .text()
       .trim();
@@ -464,14 +482,14 @@ class NyPucScraper {
       industry_affected = "Unknown";
     }
 
-    console.log("Extracting rows from the table...");
+    console.error("Extracting rows from the table...");
     const rows = await this.getGeneralRows($);
-    console.log(`Found ${rows.length} rows.`);
+    console.error(`Found ${rows.length} rows.`);
 
     rows.each((i, row) => {
       const cells = $(row).find("td");
       if (cells.length >= 6) {
-        console.log("Extracting case data from row...");
+        console.error("Extracting case data from row...");
         const case_govid = $(cells[0]).find("a").text();
         const case_url = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${case_govid}`;
         const matter_type = $(cells[1]).text();
@@ -491,7 +509,7 @@ class NyPucScraper {
           industry: industry_affected,
         };
         cases.push(caseData);
-        console.log(`Successfully extracted case: ${case_govid}`);
+        console.error(`Successfully extracted case: ${case_govid}`);
       }
     });
 
@@ -537,7 +555,7 @@ class NyPucScraper {
   async getAllCaseList(): Promise<Partial<RawGenericDocket>[]> {
     const industry_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const promises = industry_numbers.map((industry_number) => {
-      console.log(`Processing industry index: ${industry_number}`);
+      console.error(`Processing industry index: ${industry_number}`);
       const industry_url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=${industry_number}`;
       return this.getCasesAt(industry_url);
     });
@@ -600,7 +618,7 @@ class NyPucScraper {
   async getCaseMeta(gov_id: string): Promise<Partial<RawGenericDocket>> {
     // get main page
     const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=1&IA=&MT=&MST=&CN=&MNO=${gov_id}&CO=0&C=&M=&CO=0`;
-    console.log(`getting cases metadata for date ${gov_id}`);
+    console.error(`getting cases metadata for date ${gov_id}`);
     const cases: Partial<RawGenericDocket>[] = await this.getCasesAt(url);
     const basicMetadata = cases[0];
 
@@ -638,7 +656,7 @@ class NyPucScraper {
     const parties: RawGenericParty[] = [];
     const partiesTablebodySelector = "#tblActiveParty > tbody";
     const rows = $(`${partiesTablebodySelector} tr`);
-    console.log(`Found ${rows.length} party rows.`);
+    console.error(`Found ${rows.length} party rows.`);
 
     rows.each((i, row) => {
       const cells = $(row).find("td");
@@ -654,7 +672,7 @@ class NyPucScraper {
         .map((part) => part.trim())
         .filter((part) => part.length > 0);
 
-      console.log(`Row ${i} name cell parts:`, nameCellParts);
+      console.error(`Row ${i} name cell parts:`, nameCellParts);
 
       let fullName = "";
       let title = "";
@@ -716,7 +734,7 @@ class NyPucScraper {
         },
       };
 
-      console.log(`Parsed party ${i}:`, {
+      console.error(`Parsed party ${i}:`, {
         raw_input: nameCellParts[0] || "",
         full_name: fullName,
         first_name: firstName,
@@ -738,7 +756,7 @@ class NyPucScraper {
     filingOnBehalfOf?: string;
   } | null> {
     try {
-      console.log(`Fetching filing metadata from: ${filingUrl}`);
+      console.error(`Fetching filing metadata from: ${filingUrl}`);
       const $ = await this.getPage(filingUrl, "filing-detail");
 
       // Calculate hash for cache check
@@ -753,7 +771,7 @@ class NyPucScraper {
 
       const filingInfo = $("#filing_info");
       if (filingInfo.length === 0) {
-        console.log("No filing_info section found on page");
+        console.error("No filing_info section found on page");
         return null;
       }
 
@@ -791,7 +809,7 @@ class NyPucScraper {
         metadata.filingOnBehalfOf = filingOnBehalfOfElement.text().trim();
       }
 
-      console.log(`Extracted filing metadata:`, metadata);
+      console.error(`Extracted filing metadata:`, metadata);
 
       // Save parsed data to cache
       await this.saveParsedDataToCache(filingUrl, "filing-detail", htmlHash, metadata);
@@ -859,7 +877,7 @@ class NyPucScraper {
   private async enhanceFilingsWithMetadataConcurrent(
     filings: RawGenericFiling[],
   ): Promise<void> {
-    console.log("Enhancing filings with additional metadata concurrently...");
+    console.error("Enhancing filings with additional metadata concurrently...");
 
     // Use the existing processTasksWithQueue method for concurrent processing
     await this.processTasksWithQueue(
@@ -871,7 +889,7 @@ class NyPucScraper {
       this.max_concurrent_browsers
     );
 
-    console.log("Finished enhancing all filings with metadata.");
+    console.error("Finished enhancing all filings with metadata.");
   }
 
 
@@ -942,13 +960,13 @@ class NyPucScraper {
       // The count is available in the page header before the table loads
       // It's in an element with text like "Filed Documents (1234)"
       const countText = await page.textContent('#GridPlaceHolder_lbtPubDoc');
-      console.log(`Raw element text for filed documents count: "${countText}"`);
+      console.error(`Raw element text for filed documents count: "${countText}"`);
 
       if (countText) {
         const match = countText.match(/Filed Documents \((\d+)\)/);
         if (match) {
           const count = parseInt(match[1], 10);
-          console.log(`Extracted filed documents count: ${count}`);
+          console.error(`Extracted filed documents count: ${count}`);
           return count;
         } else {
           console.warn(`Text found but didn't match expected pattern: "${countText}"`);
@@ -979,12 +997,12 @@ class NyPucScraper {
     url: string,
     caseGovId: string,
   ): Promise<RawGenericFiling[]> {
-    console.log("Starting document extraction from HTML...");
+    console.error("Starting document extraction from HTML...");
     const $ = cheerio.load(html);
     const filingsMap = new Map<string, RawGenericFiling>();
     const docRows = $(`${tableSelector} tr`);
 
-    console.log(`Found ${docRows.length} document rows.`);
+    console.error(`Found ${docRows.length} document rows.`);
 
     // First pass: extract basic filing data
     docRows.each((i, docRow) => {
@@ -1051,12 +1069,12 @@ class NyPucScraper {
       }
     });
 
-    console.log("Finished basic document extraction.");
+    console.error("Finished basic document extraction.");
 
     // Second pass: fetch metadata concurrently for all filings
     const filings = Array.from(filingsMap.values());
     if (filings.length > 0) {
-      console.log(`Fetching metadata concurrently for ${filings.length} filings...`);
+      console.error(`Fetching metadata concurrently for ${filings.length} filings...`);
       await this.enhanceFilingsWithMetadataConcurrent(filings);
     }
 
@@ -1067,7 +1085,7 @@ class NyPucScraper {
     govId: string,
     caseMetadata: Partial<RawGenericDocket>
   ): Promise<RawGenericFiling[]> {
-    console.log(`Scraping documents for ${govId} using monthly search (large docket >1000 documents)`);
+    console.error(`Scraping documents for ${govId} using monthly search (large docket >1000 documents)`);
 
     // Get the case start date from metadata
     let startDate: Date;
@@ -1099,7 +1117,7 @@ class NyPucScraper {
       const startDateStr = this.formatDate(currentStart);
       const endDateStr = this.formatDate(currentEnd);
 
-      console.log(`Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`);
+      console.error(`Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`);
 
       const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=0&IA=&MT=&MST=&CN=&MNO=${govId}&CO=0&C=&M=&CO=0&DFF=${startDateStr}&DFT=${endDateStr}&DT=&CI=0&FC=`;
 
@@ -1123,7 +1141,7 @@ class NyPucScraper {
           await this.saveParsedDataToCache(url, "filing-search", htmlHash, monthFilings);
         }
 
-        console.log(`Found ${monthFilings.length} filings for month ${startDateStr}`);
+        console.error(`Found ${monthFilings.length} filings for month ${startDateStr}`);
         allFilings.push(...monthFilings);
       } catch (error) {
         console.error(`Error fetching filings for ${govId} from ${startDateStr} to ${endDateStr}:`, error);
@@ -1134,7 +1152,7 @@ class NyPucScraper {
       currentStart.setDate(1); // First day of next month
     }
 
-    console.log(`Total filings scraped for ${govId}: ${allFilings.length}`);
+    console.error(`Total filings scraped for ${govId}: ${allFilings.length}`);
     return allFilings;
   }
 
@@ -1145,7 +1163,7 @@ class NyPucScraper {
   ): Promise<RawGenericFiling[] | { documents: RawGenericFiling[]; page: Page; context: any; metadata?: Partial<RawGenericDocket> }> {
     let windowContext = null;
     try {
-      console.log(`Scraping documents for case: ${govId} (new window)`);
+      console.error(`Scraping documents for case: ${govId} (new window)`);
       const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${govId}`;
       const { context, page } = await this.newWindow();
       windowContext = context;
@@ -1235,7 +1253,7 @@ class NyPucScraper {
         windowContext = existingPage.context;
       } else {
         // Create new window and navigate
-        console.log(`Scraping parties for case: ${govId} (new window)`);
+        console.error(`Scraping parties for case: ${govId} (new window)`);
         const newWindow = await this.newWindow();
         windowContext = newWindow.context;
         page = newWindow.page;
@@ -1250,7 +1268,7 @@ class NyPucScraper {
       // Check if parties tab shows (0) - if so, return early
       const partiesButtonText = await page.textContent(partiesButtonSelector);
       if (partiesButtonText && partiesButtonText.includes("(0)")) {
-        console.log(`No parties found for case ${govId} - returning early`);
+        console.error(`No parties found for case ${govId} - returning early`);
         if (shouldCloseWindow && windowContext) {
           await windowContext.close();
         }
@@ -1314,7 +1332,7 @@ class NyPucScraper {
     govId: string,
   ): Promise<Partial<RawGenericDocket> | null> {
     try {
-      console.log(`Scraping metadata for case: ${govId}`);
+      console.error(`Scraping metadata for case: ${govId}`);
       const metadata = await this.getCaseMeta(govId);
       return metadata;
     } catch (error) {
@@ -1342,7 +1360,7 @@ class NyPucScraper {
     govIds: string[],
     mode: ScrapingMode,
   ): Promise<Partial<RawGenericDocket>[]> {
-    console.log(
+    console.error(
       `Scraping ${govIds.length} cases in ${mode} mode (parallel processing)`,
     );
 
@@ -1418,15 +1436,15 @@ class NyPucScraper {
       try {
         return_result = await processId(govID);
         if (return_result !== null) {
-          console.log(return_result.case_govid);
+          console.error(return_result.case_govid);
           // Upload disabled
           // try {
           //   await pushResultsToUploader([return_result], mode);
           // } catch (e) {
-          //   console.log(e);
+          //   console.error(e);
           // }
         } else {
-          console.log("Result was equal to null.");
+          console.error("Result was equal to null.");
         }
         return return_result;
       } catch (err) {
@@ -1494,12 +1512,12 @@ class NyPucScraper {
   async getTodaysFilingsWorkflow(
     mode: ScrapingMode = ScrapingMode.ALL,
   ): Promise<Partial<RawGenericDocket>[]> {
-    console.log("Starting today's filings workflow...");
+    console.error("Starting today's filings workflow...");
 
     // Get today's date
     const today = new Date();
     const formattedDate = this.formatDate(today);
-    console.log(`Searching for filings from: ${formattedDate}`);
+    console.error(`Searching for filings from: ${formattedDate}`);
 
     // Get all unique case numbers that had filings today
     const caseNumbers = await this.getDocketIdsWithFilingsBetweenDates(
@@ -1507,18 +1525,18 @@ class NyPucScraper {
       today,
     );
 
-    console.log(`Found ${caseNumbers.length} cases with filings today: ${caseNumbers.join(', ')}`);
+    console.error(`Found ${caseNumbers.length} cases with filings today: ${caseNumbers.join(', ')}`);
 
     if (caseNumbers.length === 0) {
-      console.log("No filings found for today");
+      console.error("No filings found for today");
       return [];
     }
 
     // Run full scraping pipeline for each case
-    console.log(`Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`);
+    console.error(`Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`);
     const results = await this.scrapeByGovIds(caseNumbers, mode);
 
-    console.log(`Today's filings workflow complete. Processed ${results.length} cases.`);
+    console.error(`Today's filings workflow complete. Processed ${results.length} cases.`);
     return results;
   }
 }
@@ -1540,6 +1558,7 @@ function parseArguments(): ScrapingOptions | null {
   let headed = false; // Default to headless
   let missing = false; // Default to not checking for missing
   let todayFilings = false; // Default to not running today's filings workflow
+  let intermediateDir: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1577,6 +1596,8 @@ function parseArguments(): ScrapingOptions | null {
       missing = true;
     } else if (arg === "--today-filings") {
       todayFilings = true;
+    } else if (arg === "--intermediate-dir") {
+      intermediateDir = args[++i];
     } else if (!arg.startsWith("--")) {
       // Backward compatibility for JSON array
       try {
@@ -1615,6 +1636,7 @@ function parseArguments(): ScrapingOptions | null {
     headed,
     missing,
     todayFilings,
+    intermediateDir,
   };
 }
 
@@ -1626,10 +1648,10 @@ async function saveResultsToFile(
   try {
     const jsonData = JSON.stringify(results, null, 2);
     fs.writeFileSync(outFile, jsonData, "utf-8");
-    console.log(
+    console.error(
       `✅ Successfully saved ${results.length} results to ${outFile}`,
     );
-    console.log(
+    console.error(
       `📊 Mode: ${mode}, File size: ${(jsonData.length / 1024).toFixed(2)} KB`,
     );
   } catch (error) {
@@ -1658,7 +1680,7 @@ async function pushResultsToUploader(
   }
   const url = "http://localhost:33399/admin/cases/upload_raw";
 
-  console.log(`Uploading ${results.length} with mode ${mode} to uploader.`);
+  console.error(`Uploading ${results.length} with mode ${mode} to uploader.`);
 
   try {
     const payload = results.map((docket) => ({
@@ -1686,7 +1708,7 @@ async function pushResultsToUploader(
       );
     }
     let govid_list = results.map((x) => x.case_govid);
-    console.log(`Successfully uploaded dockets to s3: ${govid_list}`);
+    console.error(`Successfully uploaded dockets to s3: ${govid_list}`);
 
     return "successfully uploaded docket";
   } catch (err) {
@@ -1700,13 +1722,13 @@ async function runCustomScraping(
   scraper: NyPucScraper,
   options: ScrapingOptions,
 ) {
-  console.log(`Running custom scraping with options:`, options);
+  console.error(`Running custom scraping with options:`, options);
 
   // Handle today's filings workflow
   if (options.todayFilings) {
-    console.log("Running today's filings workflow...");
+    console.error("Running today's filings workflow...");
     const results = await scraper.getTodaysFilingsWorkflow(options.mode);
-    console.log(`Today's filings workflow completed with ${results.length} results`);
+    console.error(`Today's filings workflow completed with ${results.length} results`);
 
     // Save or output results
     if (options.outFile) {
@@ -1724,36 +1746,36 @@ async function runCustomScraping(
   if (options.govIds && options.govIds.length > 0) {
     // Explicit gov IDs provided
     govIds = options.govIds;
-    console.log(`Using ${govIds.length} explicitly provided gov IDs`);
+    console.error(`Using ${govIds.length} explicitly provided gov IDs`);
   } else if (options.dateString) {
     // Single date provided
-    console.log(`Getting cases for date: ${options.dateString}`);
+    console.error(`Getting cases for date: ${options.dateString}`);
     casesToScrape = await scraper.getDateCases(options.dateString);
-    console.log(
+    console.error(
       `Found ${casesToScrape.length} cases for date ${options.dateString}`,
     );
   } else if (options.beginDate && options.endDate) {
     // Date range provided
-    console.log(
+    console.error(
       `Getting cases between ${options.beginDate} and ${options.endDate}`,
     );
     casesToScrape = await scraper.getCasesBetweenDates(
       new Date(options.beginDate),
       new Date(options.endDate),
     );
-    console.log(
+    console.error(
       `Found ${casesToScrape.length} cases between ${options.beginDate} and ${options.endDate}`,
     );
   } else {
     // No specific cases provided
     if (options.missing) {
-      console.log("No specific cases provided, getting all missing cases");
+      console.error("No specific cases provided, getting all missing cases");
       casesToScrape = await scraper.getAllMissingCaseList();
-      console.log(`Found ${casesToScrape.length} missing cases`);
+      console.error(`Found ${casesToScrape.length} missing cases`);
     } else {
-      console.log("No specific cases provided, getting all cases");
+      console.error("No specific cases provided, getting all cases");
       casesToScrape = await scraper.getAllCaseList();
-      console.log(`Found ${casesToScrape.length} cases`);
+      console.error(`Found ${casesToScrape.length} cases`);
     }
   }
 
@@ -1771,10 +1793,10 @@ async function runCustomScraping(
   }
 
   // Now scrape the cases with the specified mode
-  console.log(`Scraping ${govIds.length} cases in ${options.mode} mode`);
+  console.error(`Scraping ${govIds.length} cases in ${options.mode} mode`);
   const results = await scraper.scrapeByGovIds(govIds, options.mode);
 
-  console.log(`Scraped ${results.length} results in ${options.mode} mode`);
+  console.error(`Scraped ${results.length} results in ${options.mode} mode`);
 
   // Save or output results
   if (options.outFile) {
@@ -1791,17 +1813,21 @@ async function main() {
 
     if (!customOptions) {
       console.error("Error: No scraping arguments provided. Exiting.");
-      console.log(
+      console.error(
         "Please provide arguments to run the scraper, e.g. --mode full-all-missing",
       );
       process.exit(1);
+    }
+
+    if (!customOptions.intermediateDir) {
+      console.error("ℹ️  No --intermediate-dir specified. Intermediate files will not be saved.");
     }
 
     // Launch the browser based on the 'headed' option
     browser = await chromium.launch({ headless: !customOptions.headed });
     const context = await browser.newContext();
     const rootpage = await context.newPage();
-    const scraper = new NyPucScraper(rootpage, context, browser);
+    const scraper = new NyPucScraper(rootpage, context, browser, customOptions.intermediateDir || "");
 
     // Use custom scraping logic
     await runCustomScraping(scraper, customOptions);

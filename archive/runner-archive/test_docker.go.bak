@@ -1,0 +1,48 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+)
+
+func main() {
+	// Test Docker client directly
+	ctx := context.Background()
+	cli, err := client.NewClientWithOpts(
+		client.WithHost("unix:///Users/orchid/.docker/run/docker.sock"),
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// List images
+	images, err := cli.ImageList(ctx, types.ImageListOptions{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Available images:")
+	for _, image := range images {
+		fmt.Printf("  %v\n", image.RepoTags)
+	}
+
+	// Try to create a simple container
+	resp, err := cli.ContainerCreate(ctx, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"echo", "hello"},
+	}, nil, nil, nil, "")
+	if err != nil {
+		log.Fatalf("Container create error: %v", err)
+	}
+
+	fmt.Printf("Container created: %s\n", resp.ID)
+
+	// Clean up
+	cli.ContainerRemove(ctx, resp.ID, types.ContainerRemoveOptions{})
+}

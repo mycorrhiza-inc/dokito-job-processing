@@ -2,3 +2,5 @@
 .env
 **/node_modules
 result
+processing_objects
+playwright_intermediates

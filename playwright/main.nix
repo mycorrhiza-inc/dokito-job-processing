@@ -14,35 +14,31 @@ let
       set -euo pipefail
 
       # Common environment setup
-      export PLAYWRIGHT_BROWSERS_PATH="${pkgs-playwright.playwright.browsers}"
+      export PLAYWRIGHT_BROWSERS_PATH="${pkgs-playwright.playwright-driver.browsers}"
       export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
       export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
       export PLAYWRIGHT_NODEJS_PATH="${pkgs.nodejs_20}/bin/node"
       export NODE_PATH="${nodePackages.package}/lib/node_modules/js_scrapers/node_modules"
 
       cd "${nodePackages.package}/lib/node_modules/js_scrapers"
-      echo "Running ${name} scraper..."
+      echo "Running ${name} scraper..." >&2
       ${pkgs.nodePackages.ts-node}/bin/ts-node ${script} "$@"
     ''}";
   };
 
   # Define all available scrapers
   scrapers = {
-    ny-puc = "playwright/ny_puc_scraper.spec.ts";
-    co-puc = "playwright/co_puc_scraper.copied-spec.ts";
-    utah-coal = "playwright/utah_coal_grand_scraper.spec.ts";
+    ny-puc = "ny_puc_scraper.spec.ts";
+    co-puc = "co_puc_scraper.copied-spec.ts";
+    utah-coal = "utah_coal_grand_scraper.spec.ts";
   };
 
 in {
   # Package derivation
-  package = nodePackages.package;
+  packages = {
+    playwright-scrapers = nodePackages.package;
+  };
 
   # Apps for easy running - busybox style with multiple scrapers
-  apps = builtins.mapAttrs (name: script: mkScraperApp { inherit name script; }) scrapers // {
-    # Default maintains backward compatibility with ny-puc
-    default = mkScraperApp {
-      name = "ny-puc";
-      script = "playwright/ny_puc_scraper.spec.ts";
-    };
-  };
+  apps = builtins.mapAttrs (name: script: mkScraperApp { inherit name script; }) scrapers;
 }

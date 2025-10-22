@@ -21,32 +21,21 @@
       perSystem = { config, self', inputs', pkgs, system, ... }:
         let
           # Import component modules
-          playwrightModule = import ./playwright/nix.nix {
+          playwrightModule = import ./playwright/main.nix {
             inherit pkgs system;
             pkgs-playwright = pkgs; # Use standard nixpkgs for playwright
           };
 
-          rustModule = import ./rust-data-transforms/nix.nix {
+          rustModule = import ./rust-data-transforms/main.nix {
             inherit pkgs system naersk;
           };
 
-          # Build Go server using gomod2nix
-          goServer = gomod2nix.legacyPackages.${system}.buildGoApplication {
-            pname = "dokito-job-processing-server";
-            version = "0.1.0";
-            src = ./runner;
-            modules = ./runner/gomod2nix.toml;
-
-            meta = {
-              description = "Dokito job processing API server";
-              platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
-            };
+          runnerModule = import ./runner/main.nix {
+            inherit pkgs system gomod2nix;
           };
 
-          # Create a wrapper that sets up environment variables for the server
-          dokitoComplete = pkgs.writeShellScriptBin "dokito-complete" ''
-            set -euo pipefail
-
+          # Common environment variable setup function
+          dokitoEnvSetup = ''
             # Set scraper binary paths (these point to the app programs)
             export OPENSCRAPER_PATH_NYPUC="${playwrightModule.apps.ny-puc.program}"
             export OPENSCRAPER_PATH_COPUC="${playwrightModule.apps.co-puc.program}"
@@ -56,36 +45,63 @@
             export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
             export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
+            export BINARY_EXECUTION_PATH=$(pwd)
+          '';
 
+          # Debug function that reads and displays the actual environment variables
+          dokitoEnvDebug = ''
             echo "🔧 Environment configured:"
-            echo "  NYPUC: ${playwrightModule.apps.ny-puc.program}"
-            echo "  COPUC: ${playwrightModule.apps.co-puc.program}"
-            echo "  UtahCoal: ${playwrightModule.apps.utah-coal.program}"
-            echo "  Process: ${rustModule.packages.dokito-backend}/bin/process-dockets"
-            echo "  Upload: ${rustModule.packages.dokito-backend}/bin/upload-dockets"
-            echo "  Download: ${rustModule.packages.dokito-backend}/bin/download-attachments"
+            echo "  NYPUC: $OPENSCRAPER_PATH_NYPUC"
+            echo "  COPUC: $OPENSCRAPER_PATH_COPUC"
+            echo "  UtahCoal: $OPENSCRAPER_PATH_UTAHCOAL"
+            echo "  Process: $DOKITO_PROCESS_DOCKETS_BINARY_PATH"
+            echo "  Upload: $DOKITO_UPLOAD_DOCKETS_BINARY_PATH"
+            echo "  Download: $DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"
+            echo "  Current Directory: $BINARY_EXECUTION_PATH"
             echo ""
 
+            # Check database connectivity
+            echo "🔍 Checking database connectivity..."
+            if [ -n "''${DATABASE_URL:-}" ]; then
+              echo "  Database URL: Set (checking connection...)"
+              if ! ${pkgs.postgresql}/bin/psql "''${DATABASE_URL}" -c "SELECT 1;" >/dev/null 2>&1; then
+                echo "❌ Database connection failed!"
+                echo "   URL pattern: $(echo "''${DATABASE_URL}" | sed 's/:\/\/.*@/:\/\/<REDACTED>@/')"
+                echo "   This will cause processing and upload steps to fail."
+                echo "   Please check your database credentials and connectivity."
+                exit 1
+              else
+                echo "✅ Database connection successful"
+              fi
+            else
+              echo "⚠️  No DATABASE_URL environment variable set"
+              echo "   Processing and upload steps will fail without database access."
+              echo "   Set DATABASE_URL to continue."
+              exit 1
+            fi
+            echo ""
+          '';
+
+          # Create a wrapper that sets up environment variables for the server
+          dokitoComplete = pkgs.writeShellScriptBin "dokito-complete" ''
+            set -euo pipefail
+
+            ${dokitoEnvSetup}
+            ${dokitoEnvDebug}
+
             # Execute the server
-            exec "${goServer}/bin/runner" "$@"
+            exec "${runnerModule.binaries.server}" "$@"
           '';
 
           # Create a CLI wrapper that sets up environment variables and runs in CLI mode
           dokitoCLI = pkgs.writeShellScriptBin "dokito-cli" ''
             set -euo pipefail
 
-            # Set scraper binary paths (these point to the app programs)
-            export OPENSCRAPER_PATH_NYPUC="${playwrightModule.apps.ny-puc.program}"
-            export OPENSCRAPER_PATH_COPUC="${playwrightModule.apps.co-puc.program}"
-            export OPENSCRAPER_PATH_UTAHCOAL="${playwrightModule.apps.utah-coal.program}"
-
-            # Set dokito binary paths
-            export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
-            export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
-            export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
+            ${dokitoEnvSetup}
+            ${dokitoEnvDebug}
 
             # Execute the CLI
-            exec "${goServer}/bin/runner" "$@"
+            exec "${runnerModule.binaries.cli}" "$@"
           '';
 
         in {
@@ -94,8 +110,7 @@
             default = dokitoComplete;
             dokito-complete = dokitoComplete;
             dokito-cli = dokitoCLI;
-            go-server = goServer;
-          } // playwrightModule.packages // rustModule.packages;
+          } // playwrightModule.packages // rustModule.packages // runnerModule.packages;
 
           # Apps
           apps = {

@@ -34,8 +34,22 @@ pub async fn get_dokito_pool() -> Result<&'static PgPool, InitializePostgresErro
             Ok(pool_ref)
         }
         Err(err) => {
-            println!("{}", err);
-            println!("{:?}", err);
+            eprintln!("Failed to connect to database:");
+            eprintln!("Error: {}", err);
+            eprintln!("Debug: {:?}", err);
+            eprintln!("Connection URL pattern: {}",
+                if db_url.contains("@") {
+                    let parts: Vec<&str> = db_url.splitn(2, '@').collect();
+                    format!("{}@<REDACTED>", parts[0].chars().take(10).collect::<String>())
+                } else {
+                    "<NO_AUTH_INFO>".to_string()
+                });
+            eprintln!("Expected environment variables: POSTGRES_CONNECTION or DATABASE_URL");
+            eprintln!("");
+            eprintln!("IMPORTANT: If you see 'MAC tag mismatch' error above, this is misleading!");
+            eprintln!("This version of sqlx reports 'MAC tag mismatch' when the actual issue");
+            eprintln!("is typically an incorrect password or authentication failure.");
+            eprintln!("Check your database credentials and connection string.");
 
             Err(InitializePostgresError {})
         }
