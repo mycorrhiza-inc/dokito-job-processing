@@ -2,10 +2,25 @@ package core
 
 import (
 	"bufio"
+	"io"
 	"log"
 	"os/exec"
 	"strings"
 )
+
+// progressWriter wraps an io.Writer and calls a progress callback
+type progressWriter struct {
+	writer     io.Writer
+	onProgress func(int)
+}
+
+func (pw *progressWriter) Write(p []byte) (n int, err error) {
+	n, err = pw.writer.Write(p)
+	if pw.onProgress != nil {
+		pw.onProgress(n)
+	}
+	return n, err
+}
 
 // executeWithDebugStreaming runs a command with real-time stdout/stderr streaming
 // Returns the collected stdout for further processing (e.g., JSON parsing)
@@ -37,20 +52,42 @@ func executeWithDebugStreaming(cmd *exec.Cmd, label string) ([]byte, error) {
 		}
 	}()
 
-	// Stream stdout while collecting for JSON parsing
+	// Stream stdout while collecting for JSON parsing - optimized for large outputs
 	go func() {
 		defer close(done)
-		var outputLines []string
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			log.Printf("%s [stdout] %s", label, line)
-			outputLines = append(outputLines, line)
+
+		// Use io.Copy to handle arbitrarily large outputs without line limits
+		var outputBuffer strings.Builder
+
+		// Create a custom writer that logs progress periodically
+		const logInterval = 1024 * 1024 // Log every 1MB of data
+		bytesRead := 0
+		lastLoggedBytes := 0
+
+		// Create a tee reader to copy data while monitoring progress
+		progressWriter := &progressWriter{
+			writer: &outputBuffer,
+			onProgress: func(n int) {
+				bytesRead += n
+				if bytesRead-lastLoggedBytes >= logInterval {
+					log.Printf("%s [stdout] Progress: %.2f MB read...", label, float64(bytesRead)/(1024*1024))
+					lastLoggedBytes = bytesRead
+				}
+			},
 		}
 
-		// Join all lines back together for JSON parsing
-		fullOutput := strings.Join(outputLines, "\n")
-		outputChan <- []byte(fullOutput)
+		// Copy all stdout data to our buffer
+		_, err := io.Copy(progressWriter, stdout)
+
+		if err != nil {
+			log.Printf("%s [stdout] Copy error: %v", label, err)
+		}
+
+		totalMB := float64(bytesRead) / (1024 * 1024)
+		log.Printf("%s [stdout] Completed - processed %.2f MB total", label, totalMB)
+
+		// Send the collected output
+		outputChan <- []byte(outputBuffer.String())
 	}()
 
 	// Wait for command completion
@@ -71,6 +108,14 @@ func executeWithDebugStreaming(cmd *exec.Cmd, label string) ([]byte, error) {
 	}
 
 	return output, nil
+}
+
+// truncateString truncates a string to maxLength with ellipsis if needed
+func truncateString(s string, maxLength int) string {
+	if len(s) <= maxLength {
+		return s
+	}
+	return s[:maxLength-3] + "..."
 }
 
 // executeWithDebugStreamingNoOutput runs a command with real-time stderr streaming

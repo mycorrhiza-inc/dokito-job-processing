@@ -3,9 +3,10 @@ use clap::Parser;
 use rust_data_transforms::cli_input_types::CliRawDockets;
 use rust_data_transforms::data_processing_traits::ProcessFrom;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
+use rust_data_transforms::sql_ingester_tasks::redis_author_cache::init_redis_client;
 use rust_data_transforms::types::processed::ProcessedGenericDocket;
 use serde_json;
-use std::io::{self, Read, Write};
+use std::io::{self, BufWriter, Read, Write};
 use tracing_subscriber;
 
 #[derive(Parser)]
@@ -23,6 +24,14 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
+    // Initialize Redis cache early
+    if let Err(e) = init_redis_client().await {
+        tracing::warn!(
+            "Redis initialization failed: {}, continuing with database-only mode",
+            e
+        );
+    }
+
     let cli = Cli::parse();
 
     let mut input = String::new();
@@ -37,18 +46,26 @@ async fn main() -> Result<()> {
     let mut processed_dockets = Vec::new();
 
     for raw_docket in raw_dockets {
+        let govid = raw_docket.case_govid.clone();
         let processed =
             ProcessedGenericDocket::process_from(raw_docket, None, cli.fixed_jur).await?;
         processed_dockets.push(processed);
+
+        tracing::info!(%govid,"Successfully processed case");
     }
 
     // This returns a list even if only one was imported just to make the output json schema
     // consistent.
-    let result = serde_json::to_string(&processed_dockets)?;
+    let result_bytes = serde_json::to_vec(&processed_dockets)?;
+    tracing::info!(output_length = %result_bytes.len(),"Finished processing all dockets, and successfully serialized output");
 
-    io::stdout().write_all(result.as_bytes())?;
-    io::stdout().flush()?;
+    let stdout = io::stdout();
+    let mut handle = BufWriter::new(stdout.lock());
+
+    handle.write_all(&result_bytes)?;
+    handle.flush()?; // single flush at the end
+
+    tracing::info!("Finished writing to stdout.");
 
     Ok(())
 }
-

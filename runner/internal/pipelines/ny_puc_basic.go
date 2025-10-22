@@ -7,6 +7,7 @@ import (
 	"log"
 	"runner/internal/core"
 	"runner/internal/storage"
+	"time"
 )
 
 // NYPUCPipelineConfig contains configuration options for pipeline execution
@@ -47,6 +48,7 @@ func ExecuteNYPUCBasicPipeline(govID string) (*NYPUCPipelineResult, error) {
 
 // ExecuteNYPUCBasicPipelineWithConfig runs the NY PUC pipeline with configuration options
 func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfig) (*NYPUCPipelineResult, error) {
+	pipelineStart := time.Now()
 	log.Printf("🚀 Starting NY PUC pipeline for govID: %s", govID)
 
 	// Get binary paths
@@ -70,6 +72,7 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 	ctx := context.Background()
 
 	if config.FromRemote {
+		step1Start := time.Now()
 		log.Printf("☁️ Step 1/4: Retrieving raw data from remote storage for %s", govID)
 		rawLocation := storage.RawDocketLocation{
 			JurisdictionInfo: storage.NypucJurisdictionInfo,
@@ -87,8 +90,10 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 
 		scrapeResults = []map[string]any{rawData}
 
-		log.Printf("✅ Retrieved %d results from remote storage", len(scrapeResults))
+		step1Duration := time.Since(step1Start)
+		log.Printf("✅ Retrieved %d results from remote storage (took %v)", len(scrapeResults), step1Duration)
 	} else {
+		step1Start := time.Now()
 		log.Printf("📝 Step 1/4: Running scraper for %s", govID)
 
 		if config.DebugMode {
@@ -106,9 +111,11 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 			}
 		}
 
-		log.Printf("✅ Scraper completed. Found %d results", len(scrapeResults))
+		step1Duration := time.Since(step1Start)
+		log.Printf("✅ Scraper completed. Found %d results (took %v)", len(scrapeResults), step1Duration)
 
 		// Step 1.5: Save raw data to both local and remote locations
+		step1_5Start := time.Now()
 		log.Printf("💾 Step 1.5/4: Saving raw scraped data to local and remote storage")
 		for _, scrapeResult := range scrapeResults {
 			scrapeGovid, err := storage.TryAndExtractGovid(scrapeResult)
@@ -133,12 +140,15 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 
 			log.Printf("✅ Raw data saved to both local and remote storage")
 		}
+		step1_5Duration := time.Since(step1_5Start)
+		log.Printf("✅ Raw data storage completed (took %v)", step1_5Duration)
 	}
 
 	result.ScrapeResults = scrapeResults
 	result.ScrapeCount = len(scrapeResults)
 
 	// Step 2: Validate and process data
+	step2Start := time.Now()
 	log.Printf("🔧 Step 2/4: Processing scraped data")
 	validatedData, err := core.ValidateJSONAsArrayOfMaps(scrapeResults)
 	if err != nil {
@@ -166,9 +176,11 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 
 	result.ProcessedResults = processedResults
 	result.ProcessCount = len(processedResults)
-	log.Printf("✅ Processing completed. Processed %d results", len(processedResults))
+	step2Duration := time.Since(step2Start)
+	log.Printf("✅ Processing completed. Processed %d results (took %v)", len(processedResults), step2Duration)
 
 	// Step 2.5: Save processed data to both local and remote locations
+	step2_5Start := time.Now()
 	log.Printf("💾 Step 2.5/4: Saving processed data to local and remote storage")
 
 	for _, processedResult := range processedResults {
@@ -195,8 +207,11 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 
 		log.Printf("✅ Processed data saved to both local and remote storage")
 	}
+	step2_5Duration := time.Since(step2_5Start)
+	log.Printf("✅ Processed data storage completed (took %v)", step2_5Duration)
 
 	// Step 3: Upload results
+	step3Start := time.Now()
 	log.Printf("📤 Step 3/4: Uploading processed data")
 	if config.DebugMode {
 		err = core.ExecuteUploadBinaryDebug(processedResults, dokitoPaths)
@@ -212,8 +227,12 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 		}
 	}
 
-	log.Printf("🎉 NY PUC pipeline completed successfully for %s. Scraped %d items, processed %d items.",
-		govID, result.ScrapeCount, result.ProcessCount)
+	step3Duration := time.Since(step3Start)
+	totalPipelineDuration := time.Since(pipelineStart)
+	log.Printf("✅ Upload completed (took %v)", step3Duration)
+
+	log.Printf("🎉 NY PUC pipeline completed successfully for %s. Scraped %d items, processed %d items. Total time: %v",
+		govID, result.ScrapeCount, result.ProcessCount, totalPipelineDuration)
 
 	return result, nil
 }

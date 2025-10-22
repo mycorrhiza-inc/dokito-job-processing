@@ -27,7 +27,7 @@ func ExecuteDataProcessingBinary(data []map[string]any, paths DokitoBinaryPaths)
 		return nil, fmt.Errorf("failed to marshal input data: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, paths.ProcessDocketsPath, "--fixed-jur", "new_york_puc")
@@ -56,7 +56,7 @@ func ExecuteUploadBinary(data []map[string]any, paths DokitoBinaryPaths) error {
 		return fmt.Errorf("failed to marshal input data: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, paths.UploadDocketsPath, "--fixed-jur", "new_york_puc")
@@ -80,7 +80,7 @@ func ExecuteDataProcessingBinaryDebug(data []map[string]any, paths DokitoBinaryP
 		return nil, fmt.Errorf("failed to marshal input data: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, paths.ProcessDocketsPath, "--fixed-jur", "new_york_puc")
@@ -111,7 +111,7 @@ func ExecuteUploadBinaryDebug(data []map[string]any, paths DokitoBinaryPaths) er
 		return fmt.Errorf("failed to marshal input data: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, paths.UploadDocketsPath, "--fixed-jur", "new_york_puc")

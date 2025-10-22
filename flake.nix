@@ -46,6 +46,10 @@
             export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
             export BINARY_EXECUTION_PATH=$(pwd)
+
+            # Set up Redis configuration for author caching
+            export REDIS_DATA_DIR="$BINARY_EXECUTION_PATH/redis_data"
+            export REDIS_URL="redis://127.0.0.1:6379"
           '';
 
           # Debug function that reads and displays the actual environment variables
@@ -58,6 +62,20 @@
             echo "  Upload: $DOKITO_UPLOAD_DOCKETS_BINARY_PATH"
             echo "  Download: $DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"
             echo "  Current Directory: $BINARY_EXECUTION_PATH"
+            echo "  Redis URL: $REDIS_URL"
+            echo "  Redis Data: $REDIS_DATA_DIR"
+            echo ""
+
+            # Check Redis connectivity
+            echo "🔍 Checking Redis connectivity..."
+            if ${pkgs.redis}/bin/redis-cli ping >/dev/null 2>&1; then
+              echo "✅ Redis server responsive"
+              echo "   Cache keys: $(${pkgs.redis}/bin/redis-cli dbsize 2>/dev/null || echo 'unknown')"
+            else
+              echo "❌ Redis server not responding"
+              echo "   Author caching will be disabled"
+              echo "   To enable caching, run: nix run .#redis"
+            fi
             echo ""
 
             # Check database connectivity
@@ -104,12 +122,40 @@
             exec "${runnerModule.binaries.cli}" "$@"
           '';
 
+          # Create a Redis server wrapper for author caching
+          dokitoRedis = pkgs.writeShellScriptBin "dokito-redis" ''
+            set -euo pipefail
+
+            export BINARY_EXECUTION_PATH=$(pwd)
+            export REDIS_DATA_DIR="$BINARY_EXECUTION_PATH/redis_data"
+
+            # Create Redis data directory if it doesn't exist
+            mkdir -p "$REDIS_DATA_DIR"
+
+            echo "🚀 Starting Redis server for dokito author caching..."
+            echo "   Data directory: $REDIS_DATA_DIR"
+            echo "   URL: redis://127.0.0.1:6379"
+            echo ""
+
+            # Start Redis server in foreground mode
+            exec ${pkgs.redis}/bin/redis-server \
+              --port 6379 \
+              --dir "$REDIS_DATA_DIR" \
+              --dbfilename "dokito-cache.rdb" \
+              --save 60 1000 \
+              --maxmemory 256mb \
+              --maxmemory-policy allkeys-lru \
+              --logfile "$REDIS_DATA_DIR/redis.log" \
+              --loglevel notice
+          '';
+
         in {
           # Packages from both modules plus server
           packages = {
             default = dokitoComplete;
             dokito-complete = dokitoComplete;
             dokito-cli = dokitoCLI;
+            dokito-redis = dokitoRedis;
           } // playwrightModule.packages // rustModule.packages // runnerModule.packages;
 
           # Apps
@@ -125,6 +171,10 @@
             cli = {
               type = "app";
               program = "${dokitoCLI}/bin/dokito-cli";
+            };
+            redis = {
+              type = "app";
+              program = "${dokitoRedis}/bin/dokito-redis";
             };
           } // playwrightModule.apps // rustModule.apps;
         };
