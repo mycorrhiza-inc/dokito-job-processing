@@ -63,7 +63,7 @@
 //
 //     // First filing – contains one attachment and some authors.
 //     let filing_1 = RawGenericFiling {
-//         filling_govid: Default::default(),
+//         filing_govid: Default::default(),
 //         name: non_empty_string!("Initial Complaint").into(),
 //         filed_date: Some(filing_date_1),
 //         attachments: vec![attachment_1],
@@ -78,7 +78,7 @@
 //
 //     // Second filing – different date, different attachment.
 //     let filing_2 = RawGenericFiling {
-//         filling_govid: Default::default(),
+//         filing_govid: Default::default(),
 //         name: non_empty_string!("Supplemental Exhibit").into(),
 //         filed_date: Some(filing_date_2),
 //         attachments: vec![attachment_2],

@@ -224,12 +224,12 @@ pub async fn upload_docket_petitioner_org_connection(
     pool: &PgPool,
 ) -> Result<(), anyhow::Error> {
     if parent_docket_uuid.is_nil() {
-        bail!("Uploading filling must have a non nil uuid.")
+        bail!("Uploading filing must have a non nil uuid.")
     }
     associate_organization_with_name(upload_petitioner, fixed_jur, pool).await?;
     if upload_petitioner.object_uuid.is_nil() {
         unreachable!(
-            "Uploading filling author must have a non nil uuid. This should be impossible because it just happened in the previous step"
+            "Uploading filing author must have a non nil uuid. This should be impossible because it just happened in the previous step"
         )
     };
     let petitioner_uuid = upload_petitioner.object_uuid;
@@ -244,56 +244,56 @@ pub async fn upload_docket_petitioner_org_connection(
     .await?;
     Ok(())
 }
-pub async fn upload_filling_organization_author(
+pub async fn upload_filing_organization_author(
     upload_org_author: &mut ProcessedGenericOrganization,
-    parent_filling_uuid: Uuid,
+    parent_filing_uuid: Uuid,
     fixed_jur: FixedJurisdiction,
     pool: &PgPool,
 ) -> Result<(), anyhow::Error> {
-    if parent_filling_uuid.is_nil() {
-        bail!("Uploading filling must have a non nil uuid.")
+    if parent_filing_uuid.is_nil() {
+        bail!("Uploading filing must have a non nil uuid.")
     }
     associate_organization_with_name(upload_org_author, fixed_jur, pool).await?;
     if upload_org_author.object_uuid.is_nil() {
         unreachable!(
-            "Uploading filling author must have a non nil uuid. This should be impossible because it just happened in the previous step"
+            "Uploading filing author must have a non nil uuid. This should be impossible because it just happened in the previous step"
         )
     }
     let org_uuid = upload_org_author.object_uuid;
 
     let pg_schema = fixed_jur.get_postgres_schema_name();
     sqlx::query(&format!(
-            "INSERT INTO {pg_schema}.fillings_on_behalf_of_org_relation (author_organization_uuid, filling_uuid) VALUES ($1, $2)"
+            "INSERT INTO {pg_schema}.filings_on_behalf_of_org_relation (author_organization_uuid, filing_uuid) VALUES ($1, $2)"
         ))
         .bind(org_uuid)
-        .bind(parent_filling_uuid)
+        .bind(parent_filing_uuid)
         .execute(pool)
         .await?;
     Ok(())
 }
 
-pub async fn upload_filling_human_author(
+pub async fn upload_filing_human_author(
     upload_author: &mut ProcessedGenericHuman,
-    parent_filling_uuid: Uuid,
+    parent_filing_uuid: Uuid,
     fixed_jur: FixedJurisdiction,
     pool: &PgPool,
 ) -> Result<(), anyhow::Error> {
-    if parent_filling_uuid.is_nil() {
-        bail!("Uploading filling must have a non nil uuid.")
+    if parent_filing_uuid.is_nil() {
+        bail!("Uploading filing must have a non nil uuid.")
     }
     associate_individual_author_with_name(upload_author, fixed_jur, pool).await?;
     if upload_author.object_uuid.is_nil() {
         unreachable!(
-            "Uploading filling author must have a non nil uuid, this should be impossible dispite it being validated on the previous line."
+            "Uploading filing author must have a non nil uuid, this should be impossible dispite it being validated on the previous line."
         )
     }
 
     let pg_schema = fixed_jur.get_postgres_schema_name();
     sqlx::query(&format!(
-        "INSERT INTO {pg_schema}.fillings_filed_by_individual (human_uuid, filling_uuid) VALUES ($1, $2)"
+        "INSERT INTO {pg_schema}.filings_filed_by_individual (human_uuid, filing_uuid) VALUES ($1, $2)"
     ))
     .bind(upload_author.object_uuid)
-    .bind(parent_filling_uuid)
+    .bind(parent_filing_uuid)
     .execute(pool)
     .await?;
     Ok(())

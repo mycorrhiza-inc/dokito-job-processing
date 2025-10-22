@@ -15,6 +15,10 @@ path = "src/bin/upload_dockets.rs"
 name = "download-attachments"
 path = "src/bin/download_attachments.rs"
 
+[[bin]]
+name = "database-utils"
+path = "src/bin/database_utils.rs"
+
 [lib]
 name = "rust_data_transforms"
 path = "src/lib.rs"

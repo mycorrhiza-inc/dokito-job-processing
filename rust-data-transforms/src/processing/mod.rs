@@ -43,8 +43,8 @@ pub fn make_reflist_of_attachments_without_hash(
     case: &mut ProcessedGenericDocket,
 ) -> Vec<&mut ProcessedGenericAttachment> {
     let mut case_refs = Vec::with_capacity(case.filings.len());
-    for filling in case.filings.iter_mut() {
-        for attachment in filling.attachments.iter_mut() {
+    for filing in case.filings.iter_mut() {
+        for attachment in filing.attachments.iter_mut() {
             if attachment.hash.is_none() {
                 case_refs.push(attachment);
             }

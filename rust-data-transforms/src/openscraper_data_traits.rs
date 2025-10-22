@@ -19,7 +19,7 @@ use crate::processing::llm_prompts::{
     clean_up_organization_name_list, split_and_fix_organization_names_blob,
 };
 use crate::processing::match_raw_processed::{
-    match_raw_attaches_to_processed_attaches, match_raw_fillings_to_processed_fillings,
+    match_raw_attaches_to_processed_attaches, match_raw_filings_to_processed_filings,
 };
 use crate::sql_ingester_tasks::database_author_association::{
     associate_individual_author_with_name, associate_organization_with_name,
@@ -47,9 +47,9 @@ impl Revalidate for ProcessedGenericDocket {
                 did_change = RevalidationOutcome::DidChange;
             }
         };
-        for filling in self.filings.iter_mut() {
-            let did_filling_change = filling.revalidate().await;
-            did_change = did_change.or(&did_filling_change);
+        for filing in self.filings.iter_mut() {
+            let did_filing_change = filing.revalidate().await;
+            did_change = did_change.or(&did_filing_change);
         }
         did_change
     }
@@ -111,49 +111,49 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
             .as_ref()
             .map(|v| v.object_uuid)
             .unwrap_or_else(Uuid::new_v4);
-        let opened_date_from_fillings = {
+        let opened_date_from_filings = {
             let original_date = input.opened_date;
             let mut min_date = original_date;
-            for filling_date in input
+            for filing_date in input
                 .filings
                 .iter()
-                .filter_map(|filling| filling.filed_date)
+                .filter_map(|filing| filing.filed_date)
             {
                 if let Some(real_min_date) = min_date
-                    && filling_date < real_min_date
+                    && filing_date < real_min_date
                 {
-                    min_date = Some(filling_date);
+                    min_date = Some(filing_date);
                     if let Some(real_original_date) = original_date {
-                        warn!(docket_opened_date =%real_original_date, oldest_date_found=%filling_date,"Found filling with date older then the docket opened date");
+                        warn!(docket_opened_date =%real_original_date, oldest_date_found=%filing_date,"Found filing with date older then the docket opened date");
                     };
                 };
             }
             // This should almost never happen, because the chances of corruption happening on the
-            // docket date, and all the filling dates are very small.
+            // docket date, and all the filing dates are very small.
             min_date.unwrap_or(NaiveDate::MAX)
         };
-        let cached_fillings = cached.map(|d| d.filings);
-        let matched_fillings =
-            match_raw_fillings_to_processed_fillings(input.filings, cached_fillings);
-        let processed_fillings_futures =
-            matched_fillings
+        let cached_filings = cached.map(|d| d.filings);
+        let matched_filings =
+            match_raw_filings_to_processed_filings(input.filings, cached_filings);
+        let processed_filings_futures =
+            matched_filings
                 .into_iter()
                 .enumerate()
                 .map(async |(index, (f_raw, f_cached))| {
-                    let filling_index_data = IndexExtraData {
+                    let filing_index_data = IndexExtraData {
                         index: index as u64,
                         jurisdiction: fixed_jurisdiction,
                     };
                     let res =
-                        ProcessedGenericFiling::process_from(f_raw, f_cached, filling_index_data)
+                        ProcessedGenericFiling::process_from(f_raw, f_cached, filing_index_data)
                             .await;
                     let Ok(val) = res;
                     val
                 });
-        // Everything gets processed at once since the limiting factor on fillings is global. This
+        // Everything gets processed at once since the limiting factor on filings is global. This
         // is to make it so that it doesnt overwhelm the system trying to process 5 dockets with
-        // 10,000 fillings, but it can process 60 dockets at the same time with one filling each.
-        let mut processed_fillings = join_all(processed_fillings_futures).await;
+        // 10,000 filings, but it can process 60 dockets at the same time with one filing each.
+        let mut processed_filings = join_all(processed_filings_futures).await;
 
         fn raw_party_to_human(rawparty: RawGenericParty) -> Option<ProcessedGenericHuman> {
             let raw_name = &*rawparty.name;
@@ -221,15 +221,15 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
             processed_parties.len(),
             "raw parties should have the same length as the final parties"
         );
-        processed_fillings.sort_by_key(|v| v.index_in_docket);
+        processed_filings.sort_by_key(|v| v.index_in_docket);
         let llmed_petitioner_list = split_and_fix_organization_names_blob(&input.petitioner).await;
         let final_processed_docket = ProcessedGenericDocket {
             object_uuid,
             case_parties: processed_parties,
             processed_at: Utc::now(),
             case_govid: input.case_govid,
-            filings: processed_fillings,
-            opened_date: opened_date_from_fillings,
+            filings: processed_filings,
+            opened_date: opened_date_from_filings,
             case_name: input.case_name,
             case_url: input.case_url,
             industry: actual_industry,
@@ -308,10 +308,10 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
         });
         let (processed_attach_map, cached_orgauthorlist, cached_individualauthorllist) =
             match cached {
-                Some(filling) => (
-                    Some(filling.attachments),
-                    Some(filling.organization_authors),
-                    Some(filling.individual_authors),
+                Some(filing) => (
+                    Some(filing.attachments),
+                    Some(filing.organization_authors),
+                    Some(filing.individual_authors),
                 ),
                 None => (None, None, None),
             };
@@ -341,7 +341,7 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             .buffer_unordered(5)
             .collect::<Vec<_>>()
             .await;
-        processed_attachments.sort_by_key(|att| att.index_in_filling);
+        processed_attachments.sort_by_key(|att| att.index_in_filing);
         // Process org and individual author names.
         let mut organization_authors = {
             if let Some(org_authors) = cached_orgauthorlist {
@@ -377,14 +377,14 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             .map(|human| associate_individual_author_with_name(human, fixed_jur, pool));
         let _res = join!(join_all(org_futures), join_all(human_futures));
 
-        let proc_filling = Self {
+        let proc_filing = Self {
             object_uuid,
             filed_date: input.filed_date,
             index_in_docket: index_data.index,
             attachments: processed_attachments,
             name: input.name.clone(),
-            filling_govid: input.filling_govid.clone(),
-            filling_url: input.filling_url.clone(),
+            filing_govid: input.filing_govid.clone(),
+            filing_url: input.filing_url.clone(),
             filing_type: input.filing_type.clone(),
             description: input.description.clone(),
             // Super hacky workaround until I can change the input type.
@@ -392,7 +392,7 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             organization_authors,
             individual_authors,
         };
-        Ok(proc_filling)
+        Ok(proc_filing)
     }
 }
 
@@ -415,7 +415,7 @@ impl ProcessFrom<RawGenericAttachment> for ProcessedGenericAttachment {
         let hash = (input.hash).or_else(|| cached.and_then(|v| v.hash));
         let return_res = Self {
             object_uuid: uuid,
-            index_in_filling: index_data.index,
+            index_in_filing: index_data.index,
             name: input.name.clone(),
             document_extension: input.document_extension.clone(),
             attachment_govid: input.attachment_govid.clone(),
