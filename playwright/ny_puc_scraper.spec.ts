@@ -48,7 +48,12 @@ class NyPucScraper {
   urlTable: Record<string, string> = {};
   baseDirectory: string;
 
-  constructor(page: Page, context: any, browser: Browser, baseDirectory: string) {
+  constructor(
+    page: Page,
+    context: any,
+    browser: Browser,
+    baseDirectory: string,
+  ) {
     this.rootPage = page;
     this.context = context;
     this.browser = browser;
@@ -73,15 +78,20 @@ class NyPucScraper {
   async waitForLoadingSpinner(page: Page, timeout: number = 0): Promise<void> {
     await page.waitForFunction(
       () => {
-        const loadingSpinner = document.querySelector('#GridPlaceHolder_UpdateProgress1');
-        return !loadingSpinner || window.getComputedStyle(loadingSpinner).display === 'none';
+        const loadingSpinner = document.querySelector(
+          "#GridPlaceHolder_UpdateProgress1",
+        );
+        return (
+          !loadingSpinner ||
+          window.getComputedStyle(loadingSpinner).display === "none"
+        );
       },
-      { timeout }
+      { timeout },
     );
   }
 
   private calculateBlake2Hash(content: string): string {
-    return crypto.createHash('blake2b512').update(content).digest('hex');
+    return crypto.createHash("blake2b512").update(content).digest("hex");
   }
 
   private async updateMetadataJson(
@@ -95,13 +105,13 @@ class NyPucScraper {
       saved_at: string;
       file_size: number;
       parsed_data?: any;
-    }
+    },
   ): Promise<void> {
-    const metadataPath = path.join(directory, 'metadata.json');
+    const metadataPath = path.join(directory, "metadata.json");
 
     let existingMetadata: Record<string, any> = {};
     try {
-      const content = await fsPromises.readFile(metadataPath, 'utf-8');
+      const content = await fsPromises.readFile(metadataPath, "utf-8");
       existingMetadata = JSON.parse(content);
     } catch (error) {
       // File doesn't exist or is invalid, start with empty object
@@ -112,14 +122,14 @@ class NyPucScraper {
     await fsPromises.writeFile(
       metadataPath,
       JSON.stringify(existingMetadata, null, 2),
-      'utf-8'
+      "utf-8",
     );
   }
 
   private async findCachedParsedData(
     url: string,
     stage: string,
-    currentHash: string
+    currentHash: string,
   ): Promise<any | null> {
     try {
       // Skip if no base directory configured
@@ -132,23 +142,23 @@ class NyPucScraper {
       const hostname = urlObj.hostname;
       const pathname = urlObj.pathname;
 
-      const pathParts = pathname.split('/').filter(part => part.length > 0);
+      const pathParts = pathname.split("/").filter((part) => part.length > 0);
       pathParts.pop(); // Remove filename
-      const directoryPath = pathParts.join('/');
+      const directoryPath = pathParts.join("/");
 
       const fullDirectory = path.join(
         this.baseDirectory,
-        'raw',
-        'ny',
-        'puc',
+        "raw",
+        "ny",
+        "puc",
         hostname,
-        directoryPath
+        directoryPath,
       );
 
-      const metadataPath = path.join(fullDirectory, 'metadata.json');
+      const metadataPath = path.join(fullDirectory, "metadata.json");
 
       // Try to read metadata.json
-      const content = await fsPromises.readFile(metadataPath, 'utf-8');
+      const content = await fsPromises.readFile(metadataPath, "utf-8");
       const metadata: Record<string, any> = JSON.parse(content);
 
       // Search for entries matching URL, stage, and hash
@@ -159,12 +169,16 @@ class NyPucScraper {
           entry.blake2_hash === currentHash &&
           entry.parsed_data !== undefined
         ) {
-          console.error(`Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+          console.error(
+            `Cache HIT for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`,
+          );
           return entry.parsed_data;
         }
       }
 
-      console.error(`Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`);
+      console.error(
+        `Cache MISS for ${stage} at ${url} (hash: ${currentHash.substring(0, 16)}...)`,
+      );
       return null;
     } catch (error) {
       // File doesn't exist or other error - cache miss
@@ -177,7 +191,7 @@ class NyPucScraper {
     url: string,
     stage: string,
     hash: string,
-    parsedData: any
+    parsedData: any,
   ): Promise<void> {
     try {
       // Skip if no base directory configured
@@ -190,25 +204,25 @@ class NyPucScraper {
       const hostname = urlObj.hostname;
       const pathname = urlObj.pathname;
 
-      const pathParts = pathname.split('/').filter(part => part.length > 0);
+      const pathParts = pathname.split("/").filter((part) => part.length > 0);
       pathParts.pop(); // Remove filename
-      const directoryPath = pathParts.join('/');
+      const directoryPath = pathParts.join("/");
 
       const fullDirectory = path.join(
         this.baseDirectory,
-        'raw',
-        'ny',
-        'puc',
+        "raw",
+        "ny",
+        "puc",
         hostname,
-        directoryPath
+        directoryPath,
       );
 
-      const metadataPath = path.join(fullDirectory, 'metadata.json');
+      const metadataPath = path.join(fullDirectory, "metadata.json");
 
       // Read existing metadata
       let metadata: Record<string, any> = {};
       try {
-        const content = await fsPromises.readFile(metadataPath, 'utf-8');
+        const content = await fsPromises.readFile(metadataPath, "utf-8");
         metadata = JSON.parse(content);
       } catch (error) {
         // File doesn't exist yet, that's okay
@@ -241,12 +255,14 @@ class NyPucScraper {
         await fsPromises.writeFile(
           metadataPath,
           JSON.stringify(metadata, null, 2),
-          'utf-8'
+          "utf-8",
         );
 
         console.error(`Saved parsed data to cache for ${stage} at ${url}`);
       } else {
-        console.warn(`Could not find metadata entry to update for ${stage} at ${url}`);
+        console.warn(
+          `Could not find metadata entry to update for ${stage} at ${url}`,
+        );
       }
     } catch (error) {
       console.error(`Failed to save parsed data to cache for ${url}:`, error);
@@ -256,7 +272,7 @@ class NyPucScraper {
   private async saveHtmlSnapshot(
     html: string,
     url: string,
-    stage: string
+    stage: string,
   ): Promise<void> {
     try {
       // Skip if no base directory configured
@@ -271,25 +287,25 @@ class NyPucScraper {
       const query = urlObj.search;
 
       // Split pathname to get directory and filename
-      const pathParts = pathname.split('/').filter(part => part.length > 0);
-      const filename = pathParts.pop() || 'index.html';
-      const directoryPath = pathParts.join('/');
+      const pathParts = pathname.split("/").filter((part) => part.length > 0);
+      const filename = pathParts.pop() || "index.html";
+      const directoryPath = pathParts.join("/");
 
       // Build full directory path
       const fullDirectory = path.join(
         this.baseDirectory,
-        'raw',
-        'ny',
-        'puc',
+        "raw",
+        "ny",
+        "puc",
         hostname,
-        directoryPath
+        directoryPath,
       );
 
       // Create directory if it doesn't exist
       await fsPromises.mkdir(fullDirectory, { recursive: true });
 
       // Escape forward slashes in query
-      const escapedQuery = query.replace(/\//g, '\\/');
+      const escapedQuery = query.replace(/\//g, "\\/");
 
       // Build filename with timestamp and stage
       const timestamp = new Date().toISOString();
@@ -300,7 +316,7 @@ class NyPucScraper {
 
       // Write HTML file
       const fullPath = path.join(fullDirectory, fullFilename);
-      await fsPromises.writeFile(fullPath, html, 'utf-8');
+      await fsPromises.writeFile(fullPath, html, "utf-8");
 
       // Update metadata.json
       await this.updateMetadataJson(fullDirectory, fullFilename, {
@@ -309,7 +325,7 @@ class NyPucScraper {
         url: url,
         stage: stage,
         saved_at: timestamp,
-        file_size: Buffer.byteLength(html, 'utf-8')
+        file_size: Buffer.byteLength(html, "utf-8"),
       });
 
       console.error(`Saved HTML snapshot: ${fullPath}`);
@@ -400,8 +416,8 @@ class NyPucScraper {
         await page.waitForTimeout(100);
 
         await page.goto(url, {
-          waitUntil: 'domcontentloaded',
-          timeout: 180000
+          waitUntil: "domcontentloaded",
+          timeout: 180000,
         });
         await page.waitForLoadState("networkidle", { timeout: 180000 });
 
@@ -422,12 +438,15 @@ class NyPucScraper {
         await context.close();
         return $;
       } catch (error) {
-        console.error(`Attempt ${attempt}/${retries} failed for ${url}:`, error.message);
+        console.error(
+          `Attempt ${attempt}/${retries} failed for ${url}:`,
+          error.message,
+        );
         if (context) {
           try {
             await context.close();
           } catch (closeError) {
-            console.error('Error closing context:', closeError.message);
+            console.error("Error closing context:", closeError.message);
           }
         }
 
@@ -436,7 +455,7 @@ class NyPucScraper {
         }
 
         // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
       }
     }
   }
@@ -462,7 +481,11 @@ class NyPucScraper {
     const htmlHash = this.calculateBlake2Hash(html);
 
     // Check cache first
-    const cachedData = await this.findCachedParsedData(url, "search-results", htmlHash);
+    const cachedData = await this.findCachedParsedData(
+      url,
+      "search-results",
+      htmlHash,
+    );
     if (cachedData) {
       return cachedData;
     }
@@ -572,7 +595,9 @@ class NyPucScraper {
     html: string,
   ): Promise<string> {
     const $ = cheerio.load(html);
-    const industryElement = $("#GridPlaceHolder_MatterControl1_lblIndustryAffectedValue");
+    const industryElement = $(
+      "#GridPlaceHolder_MatterControl1_lblIndustryAffectedValue",
+    );
 
     if (industryElement.length > 0) {
       return industryElement.text().trim();
@@ -583,7 +608,7 @@ class NyPucScraper {
 
   private async scrapeMetadataFromCasePageHtml(
     html: string,
-    govId: string
+    govId: string,
   ): Promise<Partial<RawGenericDocket>> {
     const $ = cheerio.load(html);
 
@@ -592,24 +617,54 @@ class NyPucScraper {
       case_url: `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${govId}`,
     };
 
+    // So this code should be extracting information from this element: <textarea name="ctl00$GridPlaceHolder$MatterControl1$txtTitleofMatterValue" rows="3" cols="30" readonly="readonly" id="GridPlaceHolder_MatterControl1_txtTitleofMatterValue" class="form_input_box_greyed" aria-labelledby="GridPlaceHolder_MatterControl1_lblTitleofMatter">In the Matter of Staff's Proposal to Examine the Issues Concerning the Cross Connection of Verizon New York Inc. fka New York Telephone Company's House and Riser Cables.</textarea>
+    //
+    // But instead its pulling information off of this element leading to the wrong name of the case:
+    //
+    // <span id="GridPlaceHolder_MatterControl1_lblTitleofMatter" class="form_label_head" role="label" style="display:inline-block;width:222px;">
+    // <label for="GridPlaceHolder_MatterControl1_txtTitleofMatterValue">Title of Matter/Case:</label></span><span id="GridPlaceHolder_MatterControl1_lblTitleofMatter" class="form_label_head" role="label" style="display:inline-block;width:222px;">
+    // <label for="GridPlaceHolder_MatterControl1_txtTitleofMatterValue">Title of Matter/Case:</label></span>
     // Extract case name
-    const caseName = $("#GridPlaceHolder_MatterControl1_lblTitleofMatter").text().trim();
-    if (caseName) metadata.case_name = caseName;
+    const caseName = $("#GridPlaceHolder_MatterControl1_txtTitleofMatterValue")
+      .text()
+      .trim();
+    if (caseName && caseName != "Title of Matter/Case:") {
+      metadata.case_name = caseName;
+    }
 
     // Extract matter type
-    const matterType = $("#GridPlaceHolder_MatterControl1_lblMatterTypeValue").text().trim();
+    const matterType = $("#GridPlaceHolder_MatterControl1_lblMatterTypeValue")
+      .text()
+      .trim();
     if (matterType) metadata.case_type = matterType;
 
     // Extract matter subtype
-    const matterSubtype = $("#GridPlaceHolder_MatterControl1_lblMatterSubtypeValue").text().trim();
-    if (matterSubtype) metadata.case_subtype = matterSubtype;
+    let matterSubtype = $(
+      "#GridPlaceHolder_MatterControl1_lblMatterSubtypeValue",
+    )
+      .text()
+      .trim();
+
+    if (matterSubtype) {
+      const prefix = "NEW Case Proceeding:";
+      if (matterSubtype.startsWith(prefix)) {
+        matterSubtype = matterSubtype.slice(prefix.length).trim();
+      }
+      metadata.case_subtype = matterSubtype;
+    }
 
     // Extract industry
-    const industry = $("#GridPlaceHolder_MatterControl1_lblIndustryAffectedValue").text().trim();
+    const industry = $(
+      "#GridPlaceHolder_MatterControl1_lblIndustryAffectedValue",
+    )
+      .text()
+      .trim();
     metadata.industry = industry || "Unknown";
 
     // Extract case number
-    const caseNumber = $("#GridPlaceHolder_MatterControl1_lblMatterNumberValue").text().trim();
+    const caseNumber = $("#GridPlaceHolder_MatterControl1_lblMatterNumberValue")
+      .text()
+      .trim();
     if (caseNumber) metadata.case_govid = caseNumber;
 
     return metadata;
@@ -623,7 +678,10 @@ class NyPucScraper {
     const basicMetadata = cases[0];
 
     // If we got basic metadata but industry is Unknown, try to get it from the case page
-    if (basicMetadata && (basicMetadata.industry === "Unknown" || !basicMetadata.industry)) {
+    if (
+      basicMetadata &&
+      (basicMetadata.industry === "Unknown" || !basicMetadata.industry)
+    ) {
       try {
         const caseUrl = `https://documents.dps.ny.gov/public/MatterManagement/CaseMaster.aspx?MatterCaseNo=${gov_id}`;
         const casePageHtml = await this.getPage(caseUrl, "case-metadata");
@@ -631,18 +689,31 @@ class NyPucScraper {
         const htmlHash = this.calculateBlake2Hash(html);
 
         // Check cache first
-        const cachedIndustry = await this.findCachedParsedData(caseUrl, "case-metadata", htmlHash);
+        const cachedIndustry = await this.findCachedParsedData(
+          caseUrl,
+          "case-metadata",
+          htmlHash,
+        );
         if (cachedIndustry) {
           basicMetadata.industry = cachedIndustry;
         } else {
-          const industry = await this.scrapeIndustryAffectedFromFillingsHtml(html);
+          const industry =
+            await this.scrapeIndustryAffectedFromFillingsHtml(html);
           basicMetadata.industry = industry;
 
           // Save industry to cache
-          await this.saveParsedDataToCache(caseUrl, "case-metadata", htmlHash, industry);
+          await this.saveParsedDataToCache(
+            caseUrl,
+            "case-metadata",
+            htmlHash,
+            industry,
+          );
         }
       } catch (error) {
-        console.error(`Failed to extract industry from case page for ${gov_id}:`, error);
+        console.error(
+          `Failed to extract industry from case page for ${gov_id}:`,
+          error,
+        );
       }
     }
 
@@ -764,7 +835,11 @@ class NyPucScraper {
       const htmlHash = this.calculateBlake2Hash(html);
 
       // Check cache first
-      const cachedData = await this.findCachedParsedData(filingUrl, "filing-detail", htmlHash);
+      const cachedData = await this.findCachedParsedData(
+        filingUrl,
+        "filing-detail",
+        htmlHash,
+      );
       if (cachedData) {
         return cachedData;
       }
@@ -812,14 +887,16 @@ class NyPucScraper {
       console.error(`Extracted filing metadata:`, metadata);
 
       // Save parsed data to cache
-      await this.saveParsedDataToCache(filingUrl, "filing-detail", htmlHash, metadata);
+      await this.saveParsedDataToCache(
+        filingUrl,
+        "filing-detail",
+        htmlHash,
+        metadata,
+      );
 
       return metadata;
     } catch (error) {
-      console.error(
-        `Error fetching filing metadata from ${filingUrl}:`,
-        error,
-      );
+      console.error(`Error fetching filing metadata from ${filingUrl}:`, error);
       return null;
     }
   }
@@ -851,7 +928,9 @@ class NyPucScraper {
           try {
             filing.filed_date = new Date(metadata.dateFiled).toISOString();
           } catch (dateError) {
-            console.warn(`Invalid date format for filing ${filing.filing_govid}: ${metadata.dateFiled}`);
+            console.warn(
+              `Invalid date format for filing ${filing.filing_govid}: ${metadata.dateFiled}`,
+            );
           }
         }
 
@@ -886,23 +965,27 @@ class NyPucScraper {
         await this.enhanceFilingWithMetadata(filing);
         return filing;
       },
-      this.max_concurrent_browsers
+      this.max_concurrent_browsers,
     );
 
     console.error("Finished enhancing all filings with metadata.");
   }
 
-
   private extractFilingUrlFromOnclick(onclickAttr: string): string {
     if (!onclickAttr) return "";
 
     // Parse the onclick: "javascript:return OpenGridPopupWindow('../MatterManagement/MatterFilingItem.aspx','FilingSeq=360722&amp;MatterSeq=64595');"
-    const match = onclickAttr.match(/OpenGridPopupWindow\('([^']+)','([^']+)'\)/);
+    const match = onclickAttr.match(
+      /OpenGridPopupWindow\('([^']+)','([^']+)'\)/,
+    );
     if (!match) return "";
 
     const [, relativePath, params] = match;
     // Convert ../MatterManagement/MatterFilingItem.aspx to full URL
-    const fullPath = relativePath.replace("../", "https://documents.dps.ny.gov/public/");
+    const fullPath = relativePath.replace(
+      "../",
+      "https://documents.dps.ny.gov/public/",
+    );
     // Decode HTML entities in parameters (&amp; -> &)
     const decodedParams = params.replace(/&amp;/g, "&");
     return `${fullPath}?${decodedParams}`;
@@ -952,15 +1035,17 @@ class NyPucScraper {
     try {
       // Wait for the element to be visible before extracting text
       // Large dockets can take up to 2 minutes to load the count
-      await page.waitForSelector('#GridPlaceHolder_lbtPubDoc', {
-        state: 'visible',
-        timeout: 120000
+      await page.waitForSelector("#GridPlaceHolder_lbtPubDoc", {
+        state: "visible",
+        timeout: 120000,
       });
 
       // The count is available in the page header before the table loads
       // It's in an element with text like "Filed Documents (1234)"
-      const countText = await page.textContent('#GridPlaceHolder_lbtPubDoc');
-      console.error(`Raw element text for filed documents count: "${countText}"`);
+      const countText = await page.textContent("#GridPlaceHolder_lbtPubDoc");
+      console.error(
+        `Raw element text for filed documents count: "${countText}"`,
+      );
 
       if (countText) {
         const match = countText.match(/Filed Documents \((\d+)\)/);
@@ -969,23 +1054,27 @@ class NyPucScraper {
           console.error(`Extracted filed documents count: ${count}`);
           return count;
         } else {
-          console.warn(`Text found but didn't match expected pattern: "${countText}"`);
+          console.warn(
+            `Text found but didn't match expected pattern: "${countText}"`,
+          );
         }
       } else {
-        console.warn('Element found but no text content');
+        console.warn("Element found but no text content");
       }
       return 0;
     } catch (error) {
-      console.error('Failed to extract filed documents count:', error);
+      console.error("Failed to extract filed documents count:", error);
       // Try to capture what's on the page for debugging
       try {
         const allText = await page.evaluate(() => {
-          const elem = document.querySelector('#GridPlaceHolder_lbtPubDoc');
-          return elem ? `Element found: ${elem.textContent}` : 'Element not found';
+          const elem = document.querySelector("#GridPlaceHolder_lbtPubDoc");
+          return elem
+            ? `Element found: ${elem.textContent}`
+            : "Element not found";
         });
-        console.error('Debug info:', allText);
+        console.error("Debug info:", allText);
       } catch (debugError) {
-        console.error('Could not get debug info');
+        console.error("Could not get debug info");
       }
       return 0;
     }
@@ -1016,7 +1105,9 @@ class NyPucScraper {
 
         // Skip this filing if we couldn't extract a valid URL
         if (!filingUrl) {
-          console.warn(`Skipping filing ${filingNo}: could not extract valid URL from onclick attribute`);
+          console.warn(
+            `Skipping filing ${filingNo}: could not extract valid URL from onclick attribute`,
+          );
           return;
         }
 
@@ -1049,7 +1140,7 @@ class NyPucScraper {
             description: "",
             attachments: [],
             extra_metadata: { fileName },
-            filing_govid: caseGovId,
+            filing_govid: filingNo,
             filing_number: filingNo,
           });
         }
@@ -1074,7 +1165,9 @@ class NyPucScraper {
     // Second pass: fetch metadata concurrently for all filings
     const filings = Array.from(filingsMap.values());
     if (filings.length > 0) {
-      console.error(`Fetching metadata concurrently for ${filings.length} filings...`);
+      console.error(
+        `Fetching metadata concurrently for ${filings.length} filings...`,
+      );
       await this.enhanceFilingsWithMetadataConcurrent(filings);
     }
 
@@ -1083,9 +1176,11 @@ class NyPucScraper {
 
   private async scrapeDocumentsFromSearchPage(
     govId: string,
-    caseMetadata: Partial<RawGenericDocket>
+    caseMetadata: Partial<RawGenericDocket>,
   ): Promise<RawGenericFiling[]> {
-    console.error(`Scraping documents for ${govId} using monthly search (large docket >1000 documents)`);
+    console.error(
+      `Scraping documents for ${govId} using monthly search (large docket >1000 documents)`,
+    );
 
     // Get the case start date from metadata
     let startDate: Date;
@@ -1117,17 +1212,26 @@ class NyPucScraper {
       const startDateStr = this.formatDate(currentStart);
       const endDateStr = this.formatDate(currentEnd);
 
-      console.error(`Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`);
+      console.error(
+        `Fetching filings for ${govId} from ${startDateStr} to ${endDateStr}`,
+      );
 
       const url = `https://documents.dps.ny.gov/public/Common/SearchResults.aspx?MC=0&IA=&MT=&MST=&CN=&MNO=${govId}&CO=0&C=&M=&CO=0&DFF=${startDateStr}&DFT=${endDateStr}&DT=&CI=0&FC=`;
 
       try {
-        const $ = await this.getPage(url, `filing-search-${startDateStr}-to-${endDateStr}`);
+        const $ = await this.getPage(
+          url,
+          `filing-search-${startDateStr}-to-${endDateStr}`,
+        );
         const html = $.html();
         const htmlHash = this.calculateBlake2Hash(html);
 
         // Check cache first
-        const cachedData = await this.findCachedParsedData(url, "filing-search", htmlHash);
+        const cachedData = await this.findCachedParsedData(
+          url,
+          "filing-search",
+          htmlHash,
+        );
         let monthFilings: RawGenericFiling[];
 
         if (cachedData) {
@@ -1135,16 +1239,31 @@ class NyPucScraper {
         } else {
           // Scrape from the search results table
           const tableSelector = "#tblSearchedDocumentExternal > tbody";
-          monthFilings = await this.scrapeDocumentsFromHtml(html, tableSelector, url, govId);
+          monthFilings = await this.scrapeDocumentsFromHtml(
+            html,
+            tableSelector,
+            url,
+            govId,
+          );
 
           // Save to cache
-          await this.saveParsedDataToCache(url, "filing-search", htmlHash, monthFilings);
+          await this.saveParsedDataToCache(
+            url,
+            "filing-search",
+            htmlHash,
+            monthFilings,
+          );
         }
 
-        console.error(`Found ${monthFilings.length} filings for month ${startDateStr}`);
+        console.error(
+          `Found ${monthFilings.length} filings for month ${startDateStr}`,
+        );
         allFilings.push(...monthFilings);
       } catch (error) {
-        console.error(`Error fetching filings for ${govId} from ${startDateStr} to ${endDateStr}:`, error);
+        console.error(
+          `Error fetching filings for ${govId} from ${startDateStr} to ${endDateStr}:`,
+          error,
+        );
       }
 
       // Move to next month
@@ -1159,8 +1278,16 @@ class NyPucScraper {
   async scrapeDocumentsOnly(
     govId: string,
     keepWindowOpen: boolean = false,
-    extractMetadata: boolean = false
-  ): Promise<RawGenericFiling[] | { documents: RawGenericFiling[]; page: Page; context: any; metadata?: Partial<RawGenericDocket> }> {
+    extractMetadata: boolean = false,
+  ): Promise<
+    | RawGenericFiling[]
+    | {
+        documents: RawGenericFiling[];
+        page: Page;
+        context: any;
+        metadata?: Partial<RawGenericDocket>;
+      }
+  > {
     let windowContext = null;
     try {
       console.error(`Scraping documents for case: ${govId} (new window)`);
@@ -1169,15 +1296,15 @@ class NyPucScraper {
       windowContext = context;
 
       await page.goto(caseUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 180000
+        waitUntil: "domcontentloaded",
+        timeout: 180000,
       });
       await page.waitForLoadState("networkidle", { timeout: 150000 });
 
       const docsTableSelector = "#tblPubDoc > tbody";
       try {
         await page.waitForSelector(docsTableSelector, { timeout: 30_000 });
-      } catch { } // Ignore timeout, just means no documents table
+      } catch {} // Ignore timeout, just means no documents table
 
       const documentsHtml = await page.content();
 
@@ -1188,7 +1315,10 @@ class NyPucScraper {
       let metadata: Partial<RawGenericDocket> | undefined;
       if (extractMetadata) {
         try {
-          metadata = await this.scrapeMetadataFromCasePageHtml(documentsHtml, govId);
+          metadata = await this.scrapeMetadataFromCasePageHtml(
+            documentsHtml,
+            govId,
+          );
         } catch (error) {
           console.error(`Error extracting metadata for ${govId}:`, error);
           metadata = { case_govid: govId };
@@ -1196,10 +1326,19 @@ class NyPucScraper {
       }
 
       // Check cache first
-      const cachedData = await this.findCachedParsedData(caseUrl, "case-filings", htmlHash);
+      const cachedData = await this.findCachedParsedData(
+        caseUrl,
+        "case-filings",
+        htmlHash,
+      );
       if (cachedData) {
         if (keepWindowOpen) {
-          return { documents: cachedData, page, context: windowContext, metadata };
+          return {
+            documents: cachedData,
+            page,
+            context: windowContext,
+            metadata,
+          };
         }
         await windowContext.close();
         return cachedData;
@@ -1216,7 +1355,12 @@ class NyPucScraper {
       );
 
       // Save parsed data to cache
-      await this.saveParsedDataToCache(caseUrl, "case-filings", htmlHash, documents);
+      await this.saveParsedDataToCache(
+        caseUrl,
+        "case-filings",
+        htmlHash,
+        documents,
+      );
 
       if (keepWindowOpen) {
         return { documents, page, context: windowContext, metadata };
@@ -1238,7 +1382,7 @@ class NyPucScraper {
 
   async scrapePartiesOnly(
     govId: string,
-    existingPage?: { page: Page; context: any }
+    existingPage?: { page: Page; context: any },
   ): Promise<RawGenericParty[]> {
     let windowContext = null;
     let page: Page;
@@ -1299,7 +1443,11 @@ class NyPucScraper {
       const htmlHash = this.calculateBlake2Hash(partiesHtml);
 
       // Check cache first
-      const cachedData = await this.findCachedParsedData(caseUrl, "case-parties", htmlHash);
+      const cachedData = await this.findCachedParsedData(
+        caseUrl,
+        "case-parties",
+        htmlHash,
+      );
       if (cachedData) {
         if (shouldCloseWindow && windowContext) {
           await windowContext.close();
@@ -1313,7 +1461,12 @@ class NyPucScraper {
       const parties = await this.scrapePartiesFromHtml(partiesHtml);
 
       // Save parsed data to cache
-      await this.saveParsedDataToCache(caseUrl, "case-parties", htmlHash, parties);
+      await this.saveParsedDataToCache(
+        caseUrl,
+        "case-parties",
+        htmlHash,
+        parties,
+      );
 
       if (shouldCloseWindow && windowContext) {
         await windowContext.close();
@@ -1386,12 +1539,16 @@ class NyPucScraper {
           case ScrapingMode.ALL: {
             // Scrape documents with keepWindowOpen=true and extractMetadata=true
             // This opens ONE window and extracts both documents and metadata from the case page
-            const docsResult = await this.scrapeDocumentsOnly(govId, true, true);
+            const docsResult = await this.scrapeDocumentsOnly(
+              govId,
+              true,
+              true,
+            );
             let documents: RawGenericFiling[];
             let parties: RawGenericParty[];
             let metadata: Partial<RawGenericDocket> | undefined;
 
-            if (typeof docsResult === 'object' && 'documents' in docsResult) {
+            if (typeof docsResult === "object" && "documents" in docsResult) {
               documents = docsResult.documents;
               metadata = docsResult.metadata;
 
@@ -1400,7 +1557,7 @@ class NyPucScraper {
                 try {
                   parties = await this.scrapePartiesOnly(govId, {
                     page: docsResult.page,
-                    context: docsResult.context
+                    context: docsResult.context,
                   });
                 } finally {
                   // Close the window after parties scraping
@@ -1416,7 +1573,9 @@ class NyPucScraper {
               parties = await this.scrapePartiesOnly(govId);
             }
 
-            let return_case: Partial<RawGenericDocket> = metadata || { case_govid: govId };
+            let return_case: Partial<RawGenericDocket> = metadata || {
+              case_govid: govId,
+            };
             return_case.case_govid = govId;
             return_case.filings = documents;
             return_case.case_parties = parties;
@@ -1525,7 +1684,9 @@ class NyPucScraper {
       today,
     );
 
-    console.error(`Found ${caseNumbers.length} cases with filings today: ${caseNumbers.join(', ')}`);
+    console.error(
+      `Found ${caseNumbers.length} cases with filings today: ${caseNumbers.join(", ")}`,
+    );
 
     if (caseNumbers.length === 0) {
       console.error("No filings found for today");
@@ -1533,10 +1694,14 @@ class NyPucScraper {
     }
 
     // Run full scraping pipeline for each case
-    console.error(`Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`);
+    console.error(
+      `Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`,
+    );
     const results = await this.scrapeByGovIds(caseNumbers, mode);
 
-    console.error(`Today's filings workflow complete. Processed ${results.length} cases.`);
+    console.error(
+      `Today's filings workflow complete. Processed ${results.length} cases.`,
+    );
     return results;
   }
 }
@@ -1728,7 +1893,9 @@ async function runCustomScraping(
   if (options.todayFilings) {
     console.error("Running today's filings workflow...");
     const results = await scraper.getTodaysFilingsWorkflow(options.mode);
-    console.error(`Today's filings workflow completed with ${results.length} results`);
+    console.error(
+      `Today's filings workflow completed with ${results.length} results`,
+    );
 
     // Save or output results
     if (options.outFile) {
@@ -1820,14 +1987,21 @@ async function main() {
     }
 
     if (!customOptions.intermediateDir) {
-      console.error("ℹ️  No --intermediate-dir specified. Intermediate files will not be saved.");
+      console.error(
+        "ℹ️  No --intermediate-dir specified. Intermediate files will not be saved.",
+      );
     }
 
     // Launch the browser based on the 'headed' option
     browser = await chromium.launch({ headless: !customOptions.headed });
     const context = await browser.newContext();
     const rootpage = await context.newPage();
-    const scraper = new NyPucScraper(rootpage, context, browser, customOptions.intermediateDir || "");
+    const scraper = new NyPucScraper(
+      rootpage,
+      context,
+      browser,
+      customOptions.intermediateDir || "",
+    );
 
     // Use custom scraping logic
     await runCustomScraping(scraper, customOptions);
