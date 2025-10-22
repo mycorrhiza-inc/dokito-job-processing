@@ -1,12 +1,13 @@
-use anyhow::bail;
 use crate::types::processed::{ProcessedGenericHuman, ProcessedGenericOrganization};
+use anyhow::bail;
 use sqlx::{FromRow, PgPool, query_as};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
+use anyhow::Result;
 
-#[derive(FromRow)]
+#[derive(FromRow, Clone)]
 struct HumanRecord {
     uuid: Uuid,
     western_first_name: String,
@@ -15,151 +16,188 @@ struct HumanRecord {
     contact_phone_numbers: Vec<String>,
 }
 
-#[derive(FromRow)]
+#[derive(FromRow, Clone)]
 struct OrganizationRecord {
     uuid: Uuid,
     name: String,
+    // Optional: if your schema actually includes these fields, keep them
+    // aliases: Option<Vec<String>>,
+    // description: Option<String>,
+    // artifical_person_type: Option<String>,
+    // org_suffix: Option<String>,
 }
 
 pub async fn associate_individual_author_with_name(
     individual: &mut ProcessedGenericHuman,
     fixed_jur: FixedJurisdiction,
     pool: &PgPool,
-) -> Result<(), anyhow::Error> {
+) -> Result<()> {
     let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    // Step 1: Try match by UUID
     if !individual.object_uuid.is_nil() {
         let author_id = individual.object_uuid;
-        let result = query_as::<_, HumanRecord>(&format!("SELECT uuid, western_first_name, western_last_name, contact_emails, contact_phone_numbers FROM {pg_schema}.humans WHERE uuid=$1"))
-            .bind(author_id)
-            .fetch_optional(pool)
-            .await?;
+        let result = query_as::<_, HumanRecord>(&format!(
+            "SELECT uuid, western_first_name, western_last_name, contact_emails, contact_phone_numbers \
+             FROM {pg_schema}.humans WHERE uuid=$1"
+        ))
+        .bind(author_id)
+        .fetch_optional(pool)
+        .await?;
+
         if let Some(matched_record) = result
             && matched_record.western_first_name == individual.western_first_name
             && matched_record.western_last_name == individual.western_last_name
         {
-            // This should already set from the previous result, but its in here to potentially
-            // prevent any weird state bugs.
             individual.object_uuid = matched_record.uuid;
             return Ok(());
         }
-    };
-    let first_name = &*individual.western_first_name;
-    let last_name = &*individual.western_last_name;
-    let match_on_first_and_last_name = query_as::<_, HumanRecord>(
-        &format!("SELECT uuid, western_first_name, western_last_name, contact_emails, contact_phone_numbers FROM {pg_schema}.humans WHERE western_first_name=$1 AND western_last_name = $2")
-    )
-    .bind(first_name)
-    .bind(last_name)
-    .fetch_optional(pool)
-    .await?;
-    if let Some(matched_record) = match_on_first_and_last_name {
-        individual.object_uuid = matched_record.uuid;
-        let orig_email_length = matched_record.contact_emails.len();
-        let orig_phone_length = matched_record.contact_phone_numbers.len();
+    }
 
-        let mut email_set: BTreeSet<String> = matched_record.contact_emails.into_iter().collect();
-        let mut phone_set: BTreeSet<String> =
-            matched_record.contact_phone_numbers.into_iter().collect();
-
-        // Add individual's contacts (automatically deduplicated)
-        email_set.extend(individual.contact_emails.iter().cloned());
-        phone_set.extend(individual.contact_phone_numbers.iter().cloned());
-
-        // Convert back to sorted Vec
-        let merged_emails: Vec<String> = email_set.into_iter().collect();
-        let merged_phones: Vec<String> = phone_set.into_iter().collect();
-
-        // Update database with merged contact info
-        if merged_emails.len() != orig_email_length || merged_phones.len() != orig_phone_length {
-            sqlx::query(&format!(
-                "UPDATE {pg_schema}.humans SET contact_emails = $1, contact_phone_numbers = $2 WHERE uuid = $3"
-            ))
-            .bind(&merged_emails)
-            .bind(&merged_phones)
-            .bind(matched_record.uuid)
-            .execute(pool)
-            .await?;
-        };
-
+    // Step 2: Match (and possibly deduplicate) by full name
+    if let Some(found_uuid) = find_and_merge_humans_by_name(individual, &pg_schema, pool).await? {
+        individual.object_uuid = found_uuid;
         return Ok(());
-    };
-    // At this point a new object is very unlikely to exist, so go ahead and add a new object.
+    }
 
+    // Step 3: Insert new record
     let mut provisional_uuid = individual.object_uuid;
-
     if provisional_uuid.is_nil() {
         provisional_uuid = Uuid::new_v4();
+        individual.object_uuid = provisional_uuid;
     }
-    if individual.object_uuid.is_nil() {
-        individual.object_uuid = Uuid::new_v4();
-    };
-    let name = format!(
-        "{} {}",
-        individual.western_first_name, individual.western_last_name
-    );
-    let contact_emails = &individual.contact_emails;
-    let contact_phones = &individual.contact_phone_numbers;
 
     sqlx::query(&format!(
-        "INSERT INTO {pg_schema}.humans (uuid, name, western_first_name, western_last_name, contact_emails, contact_phone_numbers) VALUES ($1, $2, $3, $4, $5, $6)"
+        "INSERT INTO {pg_schema}.humans (uuid, name, western_first_name, western_last_name, contact_emails, contact_phone_numbers) \
+         VALUES ($1, $2, $3, $4, $5, $6)"
     ))
     .bind(provisional_uuid)
-    .bind(name)
+    .bind(individual.human_name.as_str())
     .bind(&individual.western_first_name)
     .bind(&individual.western_last_name)
-    .bind(contact_emails)
-    .bind(contact_phones)
+    .bind(&individual.contact_emails)
+    .bind(&individual.contact_phone_numbers)
     .execute(pool)
     .await?;
-    individual.object_uuid = provisional_uuid;
 
     Ok(())
 }
 
-// Go ahead and write the same function for an organization
+/// Helper: find all humans with the same name, deduplicate, and return the canonical UUID.
+async fn find_and_merge_humans_by_name(
+    individual: &mut ProcessedGenericHuman,
+    pg_schema: &str,
+    pool: &PgPool,
+) -> Result<Option<Uuid>> {
+    let human_name = individual.human_name.as_str();
+
+    let matches = query_as::<_, HumanRecord>(&format!(
+        "SELECT uuid, western_first_name, western_last_name, contact_emails, contact_phone_numbers \
+         FROM {pg_schema}.humans WHERE name = $1"
+    ))
+    .bind(human_name)
+    .fetch_all(pool)
+    .await?;
+
+    if matches.is_empty() {
+        return Ok(None);
+    }
+
+    let mut tx = pool.begin().await?;
+
+    let mut canonical = matches[0].clone();
+
+    let mut all_emails: BTreeSet<String> = canonical.contact_emails.clone().into_iter().collect();
+    let mut all_phones: BTreeSet<String> = canonical
+        .contact_phone_numbers
+        .clone()
+        .into_iter()
+        .collect();
+
+    for dup in &matches[1..] {
+        all_emails.extend(dup.contact_emails.iter().cloned());
+        all_phones.extend(dup.contact_phone_numbers.iter().cloned());
+    }
+
+    all_emails.extend(individual.contact_emails.iter().cloned());
+    all_phones.extend(individual.contact_phone_numbers.iter().cloned());
+
+    let merged_emails: Vec<String> = all_emails.into_iter().collect();
+    let merged_phones: Vec<String> = all_phones.into_iter().collect();
+
+    sqlx::query(&format!(
+        "UPDATE {pg_schema}.humans SET contact_emails = $1, contact_phone_numbers = $2 WHERE uuid = $3"
+    ))
+    .bind(&merged_emails)
+    .bind(&merged_phones)
+    .bind(canonical.uuid)
+    .execute(&mut *tx)
+    .await?;
+
+    if matches.len() > 1 {
+        let dup_ids: Vec<Uuid> = matches.iter().skip(1).map(|r| r.uuid).collect();
+        sqlx::query(&format!(
+            "DELETE FROM {pg_schema}.humans WHERE uuid = ANY($1)"
+        ))
+        .bind(&dup_ids)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    individual.object_uuid = canonical.uuid;
+
+    Ok(Some(canonical.uuid))
+}
+
+// -----------------------------------------------------------------------------
+// ORGANIZATIONS
+// -----------------------------------------------------------------------------
 
 pub async fn associate_organization_with_name(
     org: &mut ProcessedGenericOrganization,
     fixed_jur: FixedJurisdiction,
     pool: &PgPool,
-) -> Result<(), anyhow::Error> {
+) -> Result<()> {
     let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    // Step 1: Try by UUID
     if !org.object_uuid.is_nil() {
         let org_id = org.object_uuid;
-        let match_on_uuid = query_as::<_, OrganizationRecord>(&format!(
+        let result = query_as::<_, OrganizationRecord>(&format!(
             "SELECT uuid, name FROM {pg_schema}.organizations WHERE uuid=$1"
         ))
         .bind(org_id)
         .fetch_optional(pool)
         .await?;
-        if let Some(matched_record) = match_on_uuid
+
+        if let Some(matched_record) = result
             && matched_record.name == org.truncated_org_name
         {
             org.object_uuid = matched_record.uuid;
             return Ok(());
         }
-    };
-    let org_name = org.truncated_org_name.as_str();
+    }
 
-    let match_on_org_name = query_as::<_, OrganizationRecord>(&format!(
-        "SELECT uuid, name FROM {pg_schema}.organizations WHERE name=$1"
-    ))
-    .bind(org_name)
-    .fetch_optional(pool)
-    .await?;
-    if let Some(matched_record) = match_on_org_name {
-        org.object_uuid = matched_record.uuid;
+    // Step 2: Match (and deduplicate) by org name
+    if let Some(found_uuid) = find_and_merge_orgs_by_name(org, &pg_schema, pool).await? {
+        org.object_uuid = found_uuid;
         return Ok(());
     }
-    let mut provisional_uuid = org.object_uuid;
 
+    // Step 3: Insert new record
+    let mut provisional_uuid = org.object_uuid;
     if provisional_uuid.is_nil() {
         provisional_uuid = Uuid::new_v4();
+        org.object_uuid = provisional_uuid;
     }
+
     let org_type = org.org_type.to_string();
 
     sqlx::query(&format!(
-        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, artifical_person_type, org_suffix) VALUES ($1, $2, $3, $4, $5, $6)"
+        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, artifical_person_type, org_suffix) \
+         VALUES ($1, $2, $3, $4, $5, $6)"
     ))
     .bind(provisional_uuid)
     .bind(org.truncated_org_name.as_str())
@@ -169,9 +207,50 @@ pub async fn associate_organization_with_name(
     .bind(&org.org_suffix)
     .execute(pool)
     .await?;
-    org.object_uuid = provisional_uuid;
 
     Ok(())
+}
+
+/// Helper: deduplicate organization entries by name.
+async fn find_and_merge_orgs_by_name(
+    org: &mut ProcessedGenericOrganization,
+    pg_schema: &str,
+    pool: &PgPool,
+) -> Result<Option<Uuid>> {
+    let org_name = org.truncated_org_name.as_str();
+
+    let matches = query_as::<_, OrganizationRecord>(&format!(
+        "SELECT uuid, name FROM {pg_schema}.organizations WHERE name = $1"
+    ))
+    .bind(org_name)
+    .fetch_all(pool)
+    .await?;
+
+    if matches.is_empty() {
+        return Ok(None);
+    }
+
+    // Start a transaction to make the dedup atomic
+    let mut tx = pool.begin().await?;
+
+    // Keep the first record as canonical
+    let canonical = matches[0].clone();
+
+    // Delete all duplicates
+    if matches.len() > 1 {
+        let dup_ids: Vec<Uuid> = matches.iter().skip(1).map(|r| r.uuid).collect();
+        sqlx::query(&format!(
+            "DELETE FROM {pg_schema}.organizations WHERE uuid = ANY($1)"
+        ))
+        .bind(&dup_ids)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    org.object_uuid = canonical.uuid;
+
+    Ok(Some(canonical.uuid))
 }
 
 pub async fn upload_docket_party_human_connection(
