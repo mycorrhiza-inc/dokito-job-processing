@@ -19,6 +19,7 @@ enum ScrapingMode {
   filing = "filing",
   PARTIES = "parties",
   ALL = "all",
+  IDS_ONLY = "ids_only",
 }
 
 interface ScrapingOptions {
@@ -769,6 +770,7 @@ class NyPucScraper {
       const emailPhoneCellText = $(cells[4]).text();
       let email = "";
       let phone = "";
+      let fax_phone = "";
 
       const phoneMatch = emailPhoneCellText.match(/Ph:\s*(.*)/);
       if (phoneMatch) {
@@ -782,7 +784,14 @@ class NyPucScraper {
       } else if (emailPhoneCellText.includes("@")) {
         email = emailPhoneCellText.trim();
       } else {
-        phone = emailPhoneCellText.trim();
+        // Handle concatenated phone and fax like "(607) 656-7851Fax: (607) 656-7854"
+        const faxMatch = emailPhoneCellText.match(/(.+?)Fax:\s*(.+)/i);
+        if (faxMatch) {
+          phone = faxMatch[1].trim();
+          fax_phone = faxMatch[2].trim();
+        } else {
+          phone = emailPhoneCellText.trim();
+        }
       }
 
       const party: RawGenericParty = {
@@ -794,8 +803,10 @@ class NyPucScraper {
         human_associated_company: companyCell,
         contact_email: email,
         contact_phone: phone,
+        contact_fax: fax_phone,
         contact_address: addressCell,
         extra_metadata: {
+          contact_fax: fax_phone,
           name_cell_html: nameCellHtml,
           name_cell_parts: nameCellParts,
           raw_name_input: nameCellParts[0] || "",
@@ -1536,6 +1547,10 @@ class NyPucScraper {
             return { case_govid: govId, case_parties: parties };
           }
 
+          case ScrapingMode.IDS_ONLY: {
+            return { case_govid: govId };
+          }
+
           case ScrapingMode.ALL: {
             // Scrape documents with keepWindowOpen=true and extractMetadata=true
             // This opens ONE window and extracts both documents and metadata from the case page
@@ -1840,6 +1855,9 @@ async function pushResultsToUploader(
   if (mode == ScrapingMode.METADATA) {
     upload_type = "only_metadata";
   }
+  if (mode == ScrapingMode.IDS_ONLY) {
+    upload_type = "ids_only";
+  }
   if (mode == ScrapingMode.ALL) {
     upload_type = "all";
   }
@@ -1955,7 +1973,7 @@ async function runCustomScraping(
       );
   }
 
-  if (govIds.length === 0) {
+  if (govIds.length === 0 && options.mode != ScrapingMode.IDS_ONLY) {
     throw new Error("No cases found to scrape");
   }
 
