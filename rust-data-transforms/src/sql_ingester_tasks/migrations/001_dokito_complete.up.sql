@@ -9,7 +9,6 @@ CREATE TABLE public.organizations (
   name text NOT NULL DEFAULT ''::text,
   aliases text[] NOT NULL DEFAULT '{}'::text[],
   description text NOT NULL DEFAULT ''::text,
-  artifical_person_type text NOT NULL DEFAULT ''::text,
   org_suffix text NOT NULL DEFAULT ''::text,
   CONSTRAINT organizations_pkey PRIMARY KEY (uuid)
 );
@@ -75,7 +74,7 @@ CREATE TABLE public.attachments (
   uuid uuid NOT NULL DEFAULT gen_random_uuid(),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
-  blake2b_hash text NOT NULL DEFAULT ''::text,
+  file_hash_if_downloaded text NOT NULL DEFAULT ''::text,
   parent_filing_uuid uuid NOT NULL,
   attachment_file_extension text NOT NULL DEFAULT ''::text,
   attachment_file_name text NOT NULL DEFAULT ''::text,
