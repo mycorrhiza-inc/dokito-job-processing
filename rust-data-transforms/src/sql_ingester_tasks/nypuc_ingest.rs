@@ -18,9 +18,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sqlx::{PgPool, Pool, Postgres, query_scalar, types::Uuid};
 
-use mycorrhiza_common::{
-    tasks::ExecuteUserTask,
-};
+use mycorrhiza_common::tasks::ExecuteUserTask;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
@@ -89,121 +87,6 @@ impl ExecuteUserTask for GetMissingDocketsForFixedJurisdiction {
         Self: Sized,
     {
         "ingest_nypuc_get_missing_dockets"
-    }
-}
-
-pub async fn ingest_all_fixed_jurisdiction_data(
-    fixed_jur: FixedJurisdiction,
-    purge_data: bool,
-) -> anyhow::Result<()> {
-    info!("Got request to ingest all nypuc data.");
-
-    let pool = get_dokito_pool().await?;
-    info!("Created pg pool");
-
-    // Drop all existing tables first
-    if purge_data {
-        delete_all_data(fixed_jur, pool).await?;
-        info!("Successfully deleted all old case data.");
-    }
-    // We can set this to always true since we just purged the dataset.
-    let ignore_existing = true;
-    // Get the list of case IDs
-    let jurisdiction_info = JurisdictionInfo::from(fixed_jur);
-    let s3_client = DIGITALOCEAN_S3.make_s3_client().await;
-    let mut case_govids: Vec<String> =
-        list_raw_cases_for_jurisdiction(&s3_client, &jurisdiction_info).await?;
-    let original_caselist_length = case_govids.len();
-    info!(length=%original_caselist_length,"Got list of all cases");
-
-    if ignore_existing {
-        let _ = filter_out_existing_dokito_cases(fixed_jur, pool, &mut case_govids).await;
-    }
-
-    let mut rng = SmallRng::from_os_rng();
-    case_govids.shuffle(&mut rng);
-
-    let cases_to_process_len = case_govids.len();
-    info!(total_cases = %original_caselist_length, cases_to_process= %cases_to_process_len,"Filtered down original raw cases to a subset that is not present in the database.");
-
-    let max_simultaneous_cases = Semaphore::new(20);
-    let execute_case_wraped = async |case_id: String| {
-        let _perm = max_simultaneous_cases.acquire().await;
-        ingest_wrapped_fixed_jurisdiction_data(fixed_jur, &case_id, pool, ignore_existing).await
-    };
-    let future_cases = case_govids.into_iter().map(execute_case_wraped);
-    let futures_count = join_all(future_cases).await.len();
-
-    info!(
-        futures_count,
-        "Successfully completed all sql ingest futures."
-    );
-    info!(total_dockets = %original_caselist_length, missing_cases = % cases_to_process_len, attempted_cases = % futures_count,"Out of all the cases, we wanted to proccess the missing cases, and tried to process:");
-    Ok(())
-}
-
-async fn filter_out_existing_dokito_cases(
-    fixed_jur: FixedJurisdiction,
-    pool: &PgPool,
-    govid_list: &mut Vec<String>,
-) -> anyhow::Result<()> {
-    let pg_schema = fixed_jur.get_postgres_schema_name();
-    let existing_db_govids: Vec<String> =
-        query_scalar(&format!("SELECT docket_govid FROM {pg_schema}.dockets"))
-            .fetch_all(pool)
-            .await?;
-
-    let case_govids_owned = take(govid_list);
-    let mut case_govid_set = case_govids_owned.into_iter().collect::<HashSet<_>>();
-    for existing_govid in existing_db_govids.iter() {
-        case_govid_set.remove(existing_govid);
-    }
-    *govid_list = case_govid_set.into_iter().collect::<Vec<_>>();
-    Ok(())
-}
-
-async fn get_processed_case_or_process_if_not_existing(
-    case_address: &DocketAddress,
-) -> anyhow::Result<ProcessedGenericDocket> {
-    // S3 functionality removed - this function now returns an error
-    // The coordination framework should handle docket retrieval instead
-    anyhow::bail!(
-        "S3 docket retrieval removed from process-dockets binary. Case: {}",
-        case_address.docket_govid
-    )
-}
-
-async fn ingest_wrapped_fixed_jurisdiction_data(
-    fixed_jur: FixedJurisdiction,
-    case_id: &str,
-    pool: &PgPool,
-    ignore_existing: bool,
-) {
-    let case_address = DocketAddress {
-        jurisdiction: JurisdictionInfo::from(fixed_jur),
-        docket_govid: case_id.to_string(),
-    };
-    let case_res = get_processed_case_or_process_if_not_existing(&case_address).await;
-    match case_res {
-        Ok(mut case) => {
-            const CASE_RETRIES: usize = 3;
-            if let Err(e) = ingest_sql_case_with_retries(
-                &mut case,
-                fixed_jur,
-                pool,
-                ignore_existing,
-                CASE_RETRIES,
-            )
-            .await
-            {
-                let err_debug = format!("{:?}", e);
-                tracing::error!(case_id = %case_id, error = %e, error_debug = &err_debug[..500], "Failed to ingest case, dispite retries.");
-            }
-        }
-        Err(e) => {
-            let err_debug = format!("{:?}", e);
-            tracing::error!(case_id = %case_id, error = %e, error_debug = &err_debug[..500], "Failed to parse case")
-        }
     }
 }
 
@@ -396,11 +279,11 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
                     .map(|h| h.to_string())
                     .unwrap_or_else(|| "".to_string());
                 let attachment_uuid: Uuid = query_scalar(
-                &format!("INSERT INTO {pg_schema}.attachments (uuid, parent_filing_uuid, blake2b_hash, attachment_file_extension, attachment_file_name, attachment_title, attachment_url, openscrapers_id)
+                &format!("INSERT INTO {pg_schema}.attachments (uuid, parent_filing_uuid, file_hash_if_downloaded, attachment_file_extension, attachment_file_name, attachment_title, attachment_url, openscrapers_id)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     ON CONFLICT (uuid) DO UPDATE SET
                     parent_filing_uuid = EXCLUDED.parent_filing_uuid,
-                    blake2b_hash = EXCLUDED.blake2b_hash,
+                    file_hash_if_downloaded = EXCLUDED.file_hash_if_downloaded,
                     attachment_file_extension = EXCLUDED.attachment_file_extension,
                     attachment_file_name = EXCLUDED.attachment_file_name,
                     attachment_title = EXCLUDED.attachment_title,

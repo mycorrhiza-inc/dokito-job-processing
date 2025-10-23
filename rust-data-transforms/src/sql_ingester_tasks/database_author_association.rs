@@ -323,14 +323,13 @@ async fn associate_organization_with_name_db_only(
     let org_type = org.org_type.to_string();
 
     sqlx::query(&format!(
-        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, artifical_person_type, org_suffix) \
-         VALUES ($1, $2, $3, $4, $5, $6)"
+        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, org_suffix) \
+         VALUES ($1, $2, $3, $4, $5)"
     ))
     .bind(provisional_uuid)
     .bind(org.truncated_org_name.as_str())
     .bind(vec![org.truncated_org_name.to_string()])
     .bind("")
-    .bind(&org_type)
     .bind(&org.org_suffix)
     .execute(pool)
     .await?;
@@ -379,14 +378,13 @@ pub async fn associate_organization_with_name(
     let org_type = org.org_type.to_string();
 
     sqlx::query(&format!(
-        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, artifical_person_type, org_suffix) \
-         VALUES ($1, $2, $3, $4, $5, $6)"
+        "INSERT INTO {pg_schema}.organizations (uuid, name, aliases, description, org_suffix) \
+         VALUES ($1, $2, $3, $4, $5)"
     ))
     .bind(provisional_uuid)
     .bind(org.truncated_org_name.as_str())
     .bind(vec![org.truncated_org_name.to_string()])
     .bind("")
-    .bind(&org_type)
     .bind(&org.org_suffix)
     .execute(pool)
     .await?;
