@@ -23,6 +23,21 @@ interface StorageBackend {
   ): Promise<{ html: string; metadata: SnapshotMetadata } | null>;
 }
 
+/**
+ * Converts a URL to an S3 path for storing snapshots.
+ * Extracts hostname and directory path from the URL.
+ */
+export function urlToS3Path(url: string): string {
+  const urlObj = new URL(url);
+  const hostname = urlObj.hostname;
+  const pathname = urlObj.pathname;
+  const pathParts = pathname.split("/").filter((part) => part.length > 0);
+  pathParts.pop(); // Remove filename
+  const directoryPath = pathParts.join("/");
+
+  return `raw/ny/puc/${hostname}/${directoryPath}`;
+}
+
 export class S3StorageBackend implements StorageBackend {
   private s3Client: S3Client;
   private bucketName: string;
@@ -66,17 +81,6 @@ export class S3StorageBackend implements StorageBackend {
     );
   }
 
-  private urlToS3Path(url: string): string {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname;
-    const pathname = urlObj.pathname;
-    const pathParts = pathname.split("/").filter((part) => part.length > 0);
-    pathParts.pop(); // Remove filename
-    const directoryPath = pathParts.join("/");
-
-    return `raw/ny/puc/${hostname}/${directoryPath}`;
-  }
-
   async readMetadata(s3DirectoryPath: string): Promise<Record<string, any>> {
     // Check cache first
     if (this.metadataCache.has(s3DirectoryPath)) {
@@ -114,7 +118,7 @@ export class S3StorageBackend implements StorageBackend {
     url: string,
     stage: string,
   ): Promise<{ html: string; metadata: SnapshotMetadata } | null> {
-    const s3Path = this.urlToS3Path(url);
+    const s3Path = urlToS3Path(url);
     const metadata = await this.readMetadata(s3Path);
 
     // Find most recent snapshot matching url and stage

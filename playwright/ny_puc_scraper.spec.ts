@@ -13,7 +13,7 @@ import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
-import { S3StorageBackend } from "./storage_backends";
+import { S3StorageBackend, urlToS3Path } from "./storage_backends";
 
 enum ScrapingMode {
   METADATA = "meta",
@@ -106,17 +106,6 @@ class NyPucScraper {
     return crypto.createHash("blake2b512").update(content).digest("hex");
   }
 
-  private urlToS3Path(url: string): string {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname;
-    const pathname = urlObj.pathname;
-    const pathParts = pathname.split("/").filter((part) => part.length > 0);
-    pathParts.pop(); // Remove filename
-    const directoryPath = pathParts.join("/");
-
-    return `raw/ny/puc/${hostname}/${directoryPath}`;
-  }
-
   private async updateMetadataJson(
     directory: string,
     filename: string,
@@ -164,7 +153,7 @@ class NyPucScraper {
 
       if (this.useS3Source) {
         // Read from S3
-        const s3Path = this.urlToS3Path(url);
+        const s3Path = urlToS3Path(url);
         metadata = await this.s3Backend!.readMetadata(s3Path);
       } else {
         // Read from local filesystem (existing logic)
