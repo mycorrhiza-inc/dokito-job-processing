@@ -11,7 +11,7 @@ let
     inherit nodejs;
 
     # Hash for the node_modules (with TypeScript as dependency)
-    npmDepsHash = "sha256-j57d6PK+hT441rCyiMH/bssvNi6xreFPvH/j3K1GU/M=";
+    npmDepsHash = "sha256-Kn35iQocpRK4/bhc/TVCkGdGkpn+kr2XoNPNhBHSobU=";
 
     # Install dev dependencies for TypeScript
     npmInstallFlags = [ "--include=dev" ];

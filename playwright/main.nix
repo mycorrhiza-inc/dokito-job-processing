@@ -2,7 +2,7 @@
 
 let
   # Import the pure Nix packages
-  nodePackages = import ./default.nix {
+  nodePackages = import ./typescript_builder.nix {
     inherit pkgs system;
     nodejs = pkgs.nodejs_24;
   };

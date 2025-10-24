@@ -478,25 +478,6 @@ class NyPucScraper {
           } catch (closeError) {
             console.error("Error closing context:", (closeError as Error).message);
           }
-
-          page.url();
-          await context.close();
-          break;
-        } catch (error) {
-          console.error(
-            `Attempt ${attempt}/${retries} failed for ${url}:`,
-            error.message,
-          );
-          if (context) {
-            try {
-              await context.close();
-            } catch (closeError) {
-              console.error("Error closing context:", closeError.message);
-            }
-          }
-
-          if (attempt === retries) {
-            throw error;
           }
 
           // Wait before retry
