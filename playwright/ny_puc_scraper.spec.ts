@@ -1,3 +1,4 @@
+
 import { Scraper } from "./pipeline";
 import {
   RawGenericDocket,
@@ -434,50 +435,83 @@ class NyPucScraper {
       return cached;
     }
 
-    let html: string;
+    let html: string = "";
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const windowContext = await this.newWindow();
-        context = windowContext.context;
-        const page = windowContext.page;
-
-        // Add a small delay to ensure context is fully initialized
-        await page.waitForTimeout(100);
-
-        await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: 180000,
-        });
-        await page.waitForLoadState("networkidle", { timeout: 180000 });
-
-        // Wait for the loading spinner to disappear
-        await this.waitForLoadingSpinner(page);
-
-        console.error(`Getting page content at ${url}...`);
-        const html = await page.content();
-
-        // Save HTML snapshot if stage is provided
-        if (stage) {
-          await this.saveHtmlSnapshot(html, url, stage);
-        }
-
-        const $ = cheerio.load(html);
-        this.pageCache[url] = $;
-        page.url();
-        await context.close();
-        return $;
-      } catch (error) {
-        console.error(
-          `Attempt ${attempt}/${retries} failed for ${url}:`,
-          (error as Error).message,
+    if (this.useS3Source) {
+      // Read from S3 instead of browser, getting full snapshot metadata
+      if (!stage) {
+        throw new Error(
+          `Stage is required when using S3 source mode for URL: ${url}`,
         );
-        if (context) {
-          try {
-            await context.close();
-          } catch (closeError) {
-            console.error("Error closing context:", (closeError as Error).message);
+      }
+
+      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(url, stage);
+      if (!snapshotResult) {
+        throw new Error(
+          `No S3 snapshot found for ${url} at stage ${stage}. ` +
+            `Cannot proceed in --source-s3 mode.`,
+        );
+      }
+
+      html = snapshotResult.html;
+      const metadata = snapshotResult.metadata;
+
+      console.error(
+        `Loaded HTML from S3 for ${url}\n` +
+        `  Stage: ${metadata.stage}\n` +
+        `  Saved at: ${metadata.saved_at}\n` +
+        `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
+        `  Size: ${metadata.file_size} bytes`
+      );
+    } else {
+      // EXISTING: Use browser navigation
+      let context = null;
+      let retries = 3;
+
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const windowContext = await this.newWindow();
+          context = windowContext.context;
+          const page = windowContext.page;
+
+          // Add a small delay to ensure context is fully initialized
+          await page.waitForTimeout(100);
+
+          await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: 180000,
+          });
+          await page.waitForLoadState("networkidle", { timeout: 180000 });
+
+          // Wait for the loading spinner to disappear
+          await this.waitForLoadingSpinner(page);
+
+          console.error(`Getting page content at ${url}...`);
+          html = await page.content();
+
+          // Save HTML snapshot if stage is provided
+          if (stage) {
+            await this.saveHtmlSnapshot(html, url, stage);
           }
+
+          page.url();
+          await context.close();
+          break;
+        } catch (error) {
+          console.error(
+            `Attempt ${attempt}/${retries} failed for ${url}:`,
+            (error as Error).message,
+          );
+          if (context) {
+            try {
+              await context.close();
+            } catch (closeError) {
+              console.error("Error closing context:", (closeError as Error).message);
+            }
+          }
+
+          if (attempt === retries) {
+            throw error;
           }
 
           // Wait before retry
@@ -760,7 +794,7 @@ class NyPucScraper {
     const rows = $(`${partiesTablebodySelector} tr`);
     console.error(`Found ${rows.length} party rows.`);
 
-    rows.each((i, row) => {
+    rows.each((i: number, row: any) => {
       const cells = $(row).find("td");
       const nameCellHtml = $(cells[1]).html() || "";
       const emailPhoneCell = $(cells[4]).text();
