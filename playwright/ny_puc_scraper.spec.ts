@@ -437,23 +437,31 @@ class NyPucScraper {
     let html: string;
 
     if (this.useS3Source) {
-      // NEW: Read from S3 instead of browser
+      // Read from S3 instead of browser, getting full snapshot metadata
       if (!stage) {
         throw new Error(
           `Stage is required when using S3 source mode for URL: ${url}`,
         );
       }
 
-      const htmlFromS3 = await this.s3Backend!.readHtmlSnapshot(url, stage);
-      if (!htmlFromS3) {
+      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(url, stage);
+      if (!snapshotResult) {
         throw new Error(
           `No S3 snapshot found for ${url} at stage ${stage}. ` +
             `Cannot proceed in --source-s3 mode.`,
         );
       }
 
-      html = htmlFromS3;
-      console.error(`Loaded HTML from S3 for ${url} (stage: ${stage})`);
+      html = snapshotResult.html;
+      const metadata = snapshotResult.metadata;
+
+      console.error(
+        `Loaded HTML from S3 for ${url}\n` +
+        `  Stage: ${metadata.stage}\n` +
+        `  Saved at: ${metadata.saved_at}\n` +
+        `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
+        `  Size: ${metadata.file_size} bytes`
+      );
     } else {
       // EXISTING: Use browser navigation
       let context = null;
