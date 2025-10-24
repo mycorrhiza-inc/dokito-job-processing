@@ -1,3 +1,4 @@
+
 import { Scraper } from "./pipeline";
 import {
   RawGenericDocket,
@@ -13,6 +14,7 @@ import * as fs from "fs";
 import * as fsPromises from "fs/promises";
 import * as path from "path";
 import * as crypto from "crypto";
+import { S3StorageBackend } from "./storage_backends";
 
 enum ScrapingMode {
   METADATA = "meta",
@@ -34,6 +36,7 @@ interface ScrapingOptions {
   missing?: boolean;
   todayFilings?: boolean;
   intermediateDir?: string;
+  useS3Source?: boolean;
 }
 
 // class NyPucScraper implements Scraper {
@@ -48,17 +51,26 @@ class NyPucScraper {
   pageCache: Record<string, any> = {};
   urlTable: Record<string, string> = {};
   baseDirectory: string;
+  useS3Source: boolean = false;
+  s3Backend?: S3StorageBackend;
 
   constructor(
     page: Page,
     context: any,
     browser: Browser,
     baseDirectory: string,
+    useS3Source: boolean = false,
   ) {
     this.rootPage = page;
     this.context = context;
     this.browser = browser;
     this.baseDirectory = baseDirectory;
+    this.useS3Source = useS3Source;
+
+    if (useS3Source) {
+      this.s3Backend = new S3StorageBackend();
+      console.error("S3 source mode enabled - will only scrape from S3 storage");
+    }
   }
 
   pages(): any {
@@ -93,6 +105,17 @@ class NyPucScraper {
 
   private calculateBlake2Hash(content: string): string {
     return crypto.createHash("blake2b512").update(content).digest("hex");
+  }
+
+  private urlToS3Path(url: string): string {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    const pathname = urlObj.pathname;
+    const pathParts = pathname.split("/").filter((part) => part.length > 0);
+    pathParts.pop(); // Remove filename
+    const directoryPath = pathParts.join("/");
+
+    return `raw/ny/puc/${hostname}/${directoryPath}`;
   }
 
   private async updateMetadataJson(
@@ -133,34 +156,42 @@ class NyPucScraper {
     currentHash: string,
   ): Promise<any | null> {
     try {
-      // Skip if no base directory configured
-      if (!this.baseDirectory) {
+      // Skip if no base directory configured and not using S3
+      if (!this.baseDirectory && !this.useS3Source) {
         return null;
       }
 
-      // Parse URL to build directory path
-      const urlObj = new URL(url);
-      const hostname = urlObj.hostname;
-      const pathname = urlObj.pathname;
+      let metadata: Record<string, any> = {};
 
-      const pathParts = pathname.split("/").filter((part) => part.length > 0);
-      pathParts.pop(); // Remove filename
-      const directoryPath = pathParts.join("/");
+      if (this.useS3Source) {
+        // Read from S3
+        const s3Path = this.urlToS3Path(url);
+        metadata = await this.s3Backend!.readMetadata(s3Path);
+      } else {
+        // Read from local filesystem (existing logic)
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname;
+        const pathname = urlObj.pathname;
 
-      const fullDirectory = path.join(
-        this.baseDirectory,
-        "raw",
-        "ny",
-        "puc",
-        hostname,
-        directoryPath,
-      );
+        const pathParts = pathname.split("/").filter((part) => part.length > 0);
+        pathParts.pop(); // Remove filename
+        const directoryPath = pathParts.join("/");
 
-      const metadataPath = path.join(fullDirectory, "metadata.json");
+        const fullDirectory = path.join(
+          this.baseDirectory,
+          "raw",
+          "ny",
+          "puc",
+          hostname,
+          directoryPath,
+        );
 
-      // Try to read metadata.json
-      const content = await fsPromises.readFile(metadataPath, "utf-8");
-      const metadata: Record<string, any> = JSON.parse(content);
+        const metadataPath = path.join(fullDirectory, "metadata.json");
+
+        // Try to read metadata.json
+        const content = await fsPromises.readFile(metadataPath, "utf-8");
+        metadata = JSON.parse(content);
+      }
 
       // Search for entries matching URL, stage, and hash
       for (const [filename, entry] of Object.entries(metadata)) {
@@ -404,61 +435,94 @@ class NyPucScraper {
       return cached;
     }
 
-    let context = null;
-    let retries = 3;
+    let html: string = "";
 
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const windowContext = await this.newWindow();
-        context = windowContext.context;
-        const page = windowContext.page;
-
-        // Add a small delay to ensure context is fully initialized
-        await page.waitForTimeout(100);
-
-        await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: 180000,
-        });
-        await page.waitForLoadState("networkidle", { timeout: 180000 });
-
-        // Wait for the loading spinner to disappear
-        await this.waitForLoadingSpinner(page);
-
-        console.error(`Getting page content at ${url}...`);
-        const html = await page.content();
-
-        // Save HTML snapshot if stage is provided
-        if (stage) {
-          await this.saveHtmlSnapshot(html, url, stage);
-        }
-
-        const $ = cheerio.load(html);
-        this.pageCache[url] = $;
-        page.url();
-        await context.close();
-        return $;
-      } catch (error) {
-        console.error(
-          `Attempt ${attempt}/${retries} failed for ${url}:`,
-          error.message,
+    if (this.useS3Source) {
+      // Read from S3 instead of browser, getting full snapshot metadata
+      if (!stage) {
+        throw new Error(
+          `Stage is required when using S3 source mode for URL: ${url}`,
         );
-        if (context) {
-          try {
-            await context.close();
-          } catch (closeError) {
-            console.error("Error closing context:", closeError.message);
+      }
+
+      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(url, stage);
+      if (!snapshotResult) {
+        throw new Error(
+          `No S3 snapshot found for ${url} at stage ${stage}. ` +
+            `Cannot proceed in --source-s3 mode.`,
+        );
+      }
+
+      html = snapshotResult.html;
+      const metadata = snapshotResult.metadata;
+
+      console.error(
+        `Loaded HTML from S3 for ${url}\n` +
+        `  Stage: ${metadata.stage}\n` +
+        `  Saved at: ${metadata.saved_at}\n` +
+        `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
+        `  Size: ${metadata.file_size} bytes`
+      );
+    } else {
+      // EXISTING: Use browser navigation
+      let context = null;
+      let retries = 3;
+
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const windowContext = await this.newWindow();
+          context = windowContext.context;
+          const page = windowContext.page;
+
+          // Add a small delay to ensure context is fully initialized
+          await page.waitForTimeout(100);
+
+          await page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: 180000,
+          });
+          await page.waitForLoadState("networkidle", { timeout: 180000 });
+
+          // Wait for the loading spinner to disappear
+          await this.waitForLoadingSpinner(page);
+
+          console.error(`Getting page content at ${url}...`);
+          html = await page.content();
+
+          // Save HTML snapshot if stage is provided
+          if (stage) {
+            await this.saveHtmlSnapshot(html, url, stage);
           }
-        }
 
-        if (attempt === retries) {
-          throw error;
-        }
+          page.url();
+          await context.close();
+          break;
+        } catch (error) {
+          console.error(
+            `Attempt ${attempt}/${retries} failed for ${url}:`,
+            (error as Error).message,
+          );
+          if (context) {
+            try {
+              await context.close();
+            } catch (closeError) {
+              console.error("Error closing context:", (closeError as Error).message);
+            }
+          }
 
-        // Wait before retry
-        await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          if (attempt === retries) {
+            throw error;
+          }
+
+          // Wait before retry
+          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+        }
       }
     }
+
+    const $ = cheerio.load(html);
+    this.pageCache[url] = $;
+    return $;
   }
 
   async getDateCases(dateString: string): Promise<Partial<RawGenericDocket>[]> {
@@ -510,7 +574,7 @@ class NyPucScraper {
     const rows = await this.getGeneralRows($);
     console.error(`Found ${rows.length} rows.`);
 
-    rows.each((i, row) => {
+    rows.each((i: number, row: any) => {
       const cells = $(row).find("td");
       if (cells.length >= 6) {
         console.error("Extracting case data from row...");
@@ -730,7 +794,7 @@ class NyPucScraper {
     const rows = $(`${partiesTablebodySelector} tr`);
     console.error(`Found ${rows.length} party rows.`);
 
-    rows.each((i, row) => {
+    rows.each((i: number, row: any) => {
       const cells = $(row).find("td");
       const nameCellHtml = $(cells[1]).html() || "";
       const emailPhoneCell = $(cells[4]).text();
@@ -1126,7 +1190,7 @@ class NyPucScraper {
         const attachmentUrlRaw = $(docCells[3]).find("a").attr("href");
 
         const attachmentUrl = new URL(
-          attachmentUrlRaw.replace(
+          (attachmentUrlRaw || "").replace(
             "../",
             "https://documents.dps.ny.gov/public/",
           ),
@@ -1657,7 +1721,7 @@ class NyPucScraper {
     const $ = await this.getPage(url);
     const docketGovIds: string[] = [];
 
-    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each((i, row) => {
+    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each((i: number, row: any) => {
       const cells = $(row).find("td");
       const docketGovId = $(cells[4]).find("a").text().trim();
       if (docketGovId) {
@@ -1739,6 +1803,7 @@ function parseArguments(): ScrapingOptions | null {
   let missing = false; // Default to not checking for missing
   let todayFilings = false; // Default to not running today's filings workflow
   let intermediateDir: string | undefined;
+  let useS3Source = false; // Default to not using S3 source
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1778,6 +1843,8 @@ function parseArguments(): ScrapingOptions | null {
       todayFilings = true;
     } else if (arg === "--intermediate-dir") {
       intermediateDir = args[++i];
+    } else if (arg === "--source-s3") {
+      useS3Source = true;
     } else if (!arg.startsWith("--")) {
       // Backward compatibility for JSON array
       try {
@@ -1817,6 +1884,7 @@ function parseArguments(): ScrapingOptions | null {
     missing,
     todayFilings,
     intermediateDir,
+    useS3Source,
   };
 }
 
@@ -2019,6 +2087,7 @@ async function main() {
       context,
       browser,
       customOptions.intermediateDir || "",
+      customOptions.useS3Source || false,
     );
 
     // Use custom scraping logic

@@ -2,19 +2,19 @@
   "name": "js_scrapers",
   "version": "1.0.0",
   "description": "JavaScript scrapers for web data extraction",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
+    "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
     "cheerio": "^1.1.2",
     "papaparse": "^5.5.3",
-    "playwright": "1.54.1"
-  },
-  "devDependencies": {
+    "playwright": "1.54.1",
     "@playwright/test": "1.54.1",
     "@types/node": "^24.3.1",
     "@types/papaparse": "^5.3.16",
