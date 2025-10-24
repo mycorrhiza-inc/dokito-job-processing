@@ -1,10 +1,10 @@
 { pkgs, pkgs-playwright, system }:
 
 let
-  # Import the node2nix generated packages
+  # Import the pure Nix packages
   nodePackages = import ./default.nix {
     inherit pkgs system;
-    nodejs = pkgs.nodejs_20;  # Use Node.js 20 instead of default 14
+    nodejs = pkgs.nodejs_24;
   };
 
   # Create a wrapper script for each scraper
@@ -17,12 +17,12 @@ let
       export PLAYWRIGHT_BROWSERS_PATH="${pkgs-playwright.playwright-driver.browsers}"
       export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
       export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
-      export PLAYWRIGHT_NODEJS_PATH="${pkgs.nodejs_20}/bin/node"
-      export NODE_PATH="${nodePackages.package}/lib/node_modules/js_scrapers/node_modules"
+      export PLAYWRIGHT_NODEJS_PATH="${pkgs.nodejs_24}/bin/node"
+      export NODE_PATH="${nodePackages.package}/lib/js_scrapers/node_modules"
 
-      cd "${nodePackages.package}/lib/node_modules/js_scrapers"
+      cd "${nodePackages.package}/lib/js_scrapers"
       echo "Running ${name} scraper..." >&2
-      ${pkgs.nodePackages.ts-node}/bin/ts-node ${script} "$@"
+      ${pkgs.nodejs_24}/bin/node dist/${builtins.replaceStrings [".ts"] [".js"] script} "$@"
     ''}";
   };
 
@@ -37,6 +37,7 @@ in {
   # Package derivation
   packages = {
     playwright-scrapers = nodePackages.package;
+    nodeModules = nodePackages.nodeModules;
   };
 
   # Apps for easy running - busybox style with multiple scrapers

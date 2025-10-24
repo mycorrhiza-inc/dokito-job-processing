@@ -441,13 +441,13 @@ class NyPucScraper {
       } catch (error) {
         console.error(
           `Attempt ${attempt}/${retries} failed for ${url}:`,
-          error.message,
+          (error as Error).message,
         );
         if (context) {
           try {
             await context.close();
           } catch (closeError) {
-            console.error("Error closing context:", closeError.message);
+            console.error("Error closing context:", (closeError as Error).message);
           }
         }
 
@@ -510,7 +510,7 @@ class NyPucScraper {
     const rows = await this.getGeneralRows($);
     console.error(`Found ${rows.length} rows.`);
 
-    rows.each((i, row) => {
+    rows.each((i: number, row: any) => {
       const cells = $(row).find("td");
       if (cells.length >= 6) {
         console.error("Extracting case data from row...");
@@ -1126,7 +1126,7 @@ class NyPucScraper {
         const attachmentUrlRaw = $(docCells[3]).find("a").attr("href");
 
         const attachmentUrl = new URL(
-          attachmentUrlRaw.replace(
+          (attachmentUrlRaw || "").replace(
             "../",
             "https://documents.dps.ny.gov/public/",
           ),
@@ -1657,7 +1657,7 @@ class NyPucScraper {
     const $ = await this.getPage(url);
     const docketGovIds: string[] = [];
 
-    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each((i, row) => {
+    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each((i: number, row: any) => {
       const cells = $(row).find("td");
       const docketGovId = $(cells[4]).find("a").text().trim();
       if (docketGovId) {
