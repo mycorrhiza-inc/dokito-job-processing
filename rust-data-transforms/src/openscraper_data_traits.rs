@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::data_processing_traits::{ProcessFrom, Revalidate, RevalidationOutcome};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::llm_prompts::{
-    clean_up_organization_name_list,
+    clean_up_organization_name_list, split_and_fix_organization_names_blob,
 };
 use crate::processing::match_raw_processed::{
     match_raw_attaches_to_processed_attaches, match_raw_filings_to_processed_filings,
@@ -23,8 +23,8 @@ use crate::processing::match_raw_processed::{
 use crate::sql_ingester_tasks::database_author_association::{
     associate_individual_author_with_name_cached, associate_organization_with_name_cached,
 };
-use crate::sql_ingester_tasks::redis_author_cache::init_redis_client;
 use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
+use crate::sql_ingester_tasks::redis_author_cache::init_redis_client;
 use crate::types::processed::{
     ProcessedGenericAttachment, ProcessedGenericDocket, ProcessedGenericFiling,
 };
@@ -112,11 +112,7 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
         let opened_date_from_filings = {
             let original_date = input.opened_date;
             let mut min_date = original_date;
-            for filing_date in input
-                .filings
-                .iter()
-                .filter_map(|filing| filing.filed_date)
-            {
+            for filing_date in input.filings.iter().filter_map(|filing| filing.filed_date) {
                 if let Some(real_min_date) = min_date
                     && filing_date < real_min_date
                 {
@@ -131,8 +127,7 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
             min_date.unwrap_or(NaiveDate::MAX)
         };
         let cached_filings = cached.map(|d| d.filings);
-        let matched_filings =
-            match_raw_filings_to_processed_filings(input.filings, cached_filings);
+        let matched_filings = match_raw_filings_to_processed_filings(input.filings, cached_filings);
 
         // Process filings in batches to avoid memory exhaustion and connection pool issues
         // For large dockets (>100 filings), process in smaller batches
@@ -141,25 +136,21 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
             "Starting filing processing"
         );
 
-        let mut processed_filings = if matched_filings.len() > 100 {
-            let mut results = Vec::with_capacity(matched_filings.len());
-            let total_batches = (matched_filings.len() + 49) / 50; // Round up division
+        let mut processed_filings = {
+            const BATCH_SIZE: usize = 50;
+            if matched_filings.len() > BATCH_SIZE {
+                let total_batches = (matched_filings.len() + BATCH_SIZE - 1) / BATCH_SIZE; // Round up division
 
-            tracing::info!(
-                total_batches = total_batches,
-                batch_size = 50,
-                "Processing large docket in batches"
-            );
+                tracing::info!(
+                    total_batches = total_batches,
+                    batch_size = BATCH_SIZE,
+                    "Processing large docket in batches"
+                );
+            };
+            let mut results = Vec::with_capacity(matched_filings.len());
 
             // Process in batches of 50 to avoid overwhelming memory/connections
-            for (batch_offset, batch) in matched_filings.chunks(50).enumerate() {
-                tracing::info!(
-                    batch_number = batch_offset + 1,
-                    total_batches = total_batches,
-                    batch_size = batch.len(),
-                    "Starting batch processing"
-                );
-
+            for (batch_offset, batch) in matched_filings.chunks(BATCH_SIZE).enumerate() {
                 let batch_futures = batch
                     .iter()
                     .enumerate()
@@ -186,44 +177,13 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
                 let mut batch_results = join_all(batch_futures).await;
                 results.append(&mut batch_results);
 
-                tracing::info!(
-                    batch_number = batch_offset + 1,
-                    processed_so_far = results.len(),
-                    total_filings = matched_filings.len(),
-                    "Completed batch processing"
-                );
-
                 // Brief pause between batches to allow cleanup
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
 
             tracing::info!(
                 total_processed = results.len(),
-                "Completed all batch processing"
-            );
-            results
-        } else {
-            tracing::info!("Processing small docket all at once");
-            // Original logic for smaller dockets - process all at once
-            let processed_filings_futures =
-                matched_filings
-                    .into_iter()
-                    .enumerate()
-                    .map(async |(index, (f_raw, f_cached))| {
-                        let filing_index_data = IndexExtraData {
-                            index: index as u64,
-                            jurisdiction: fixed_jurisdiction,
-                        };
-                        let res =
-                            ProcessedGenericFiling::process_from(f_raw, f_cached, filing_index_data)
-                                .await;
-                        let Ok(val) = res;
-                        val
-                    });
-            let results = join_all(processed_filings_futures).await;
-            tracing::info!(
-                total_processed = results.len(),
-                "Completed small docket processing"
+                "Completed all filings with batch processing"
             );
             results
         };
@@ -282,31 +242,27 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
             .into_iter()
             .filter_map(raw_party_to_human)
             .collect::<Vec<_>>();
-        tracing::info!(case_parties_length = %processed_parties.len(),"Processed parties has final length");
         let pool = get_dokito_pool().await.unwrap();
 
         // Initialize Redis cache if not already done
         let _ = init_redis_client().await;
 
         // Concurrent processing of parties using cached lookups
-        tracing::info!("Starting concurrent party processing with Redis cache");
-        let party_futures = processed_parties
-            .iter_mut()
-            .map(|party| associate_individual_author_with_name_cached(party, fixed_jurisdiction, pool));
+        let party_futures = processed_parties.iter_mut().map(|party| {
+            associate_individual_author_with_name_cached(party, fixed_jurisdiction, pool)
+        });
         let _party_results = join_all(party_futures).await;
         // Note: processed_parties may be fewer than raw_parties due to filtering
         // Only human parties are kept, so this assertion is removed
-        tracing::info!(
+        tracing::debug!(
             raw_count = raw_parties_length,
             processed_count = processed_parties.len(),
             "Party processing completed"
         );
         processed_filings.sort_by_key(|v| v.index_in_docket);
-        // Skip LLM processing of petitioner field for process-dockets binary
-        // This should be handled by the coordination framework instead
         let llmed_petitioner_list = if !input.petitioner.trim().is_empty() {
-            tracing::info!("Skipping LLM petitioner processing in process-dockets binary");
-            vec![] // Return empty list to avoid external API calls
+            let raw_petitioner = &*input.petitioner;
+            split_and_fix_organization_names_blob(raw_petitioner).await
         } else {
             vec![]
         };
@@ -398,12 +354,7 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             .map(|v| v.object_uuid)
             .unwrap_or_else(Uuid::new_v4);
         let _pg_pool = get_dokito_pool().await.unwrap_or_else(|e| {
-            eprintln!("FATAL: Failed to initialize database connection during processing");
-            eprintln!("Error: {:?}", e);
-            eprintln!("This is likely due to missing or incorrect database environment variables:");
-            eprintln!("  - POSTGRES_CONNECTION or DATABASE_URL must be set");
-            eprintln!("  - Database must be accessible and credentials must be correct");
-            panic!("Cannot proceed without database connection");
+            panic!("Cannot proceed without database connection: {e}");
         });
         let (processed_attach_map, cached_orgauthorlist, cached_individualauthorllist) =
             match cached {
@@ -446,13 +397,6 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             if let Some(org_authors) = cached_orgauthorlist {
                 org_authors
             } else if input.organization_authors.is_empty() {
-                tracing::info!(
-                    filing_index = index_data.index,
-                    org_blob_length = input.organization_authors_blob.len(),
-                    "Skipping LLM org authors processing in process-dockets binary"
-                );
-                // Skip LLM processing to avoid external API calls in process-dockets binary
-                // This should be handled by the coordination framework instead
                 vec![]
             } else {
                 clean_up_organization_name_list(input.organization_authors)
@@ -489,11 +433,6 @@ impl ProcessFrom<RawGenericFiling> for ProcessedGenericFiling {
             .iter_mut()
             .map(|human| associate_individual_author_with_name_cached(human, fixed_jur, pool));
         let _res = join!(join_all(org_futures), join_all(human_futures));
-
-        tracing::info!(
-            filing_index = index_data.index,
-            "Completed filing processing"
-        );
 
         let proc_filing = Self {
             object_uuid,

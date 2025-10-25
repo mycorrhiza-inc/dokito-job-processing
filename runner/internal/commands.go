@@ -28,6 +28,8 @@ func RunCLI() {
 		RunProcessOnly()
 	case "upload":
 		RunUploadOnly()
+	case "missing-govids":
+		RunMissingGovIds()
 	case "env":
 		ShowEnvironment()
 	case "help", "-h", "--help":
@@ -47,6 +49,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli scrape <gov_id>                                     - Run scraper only and print results")
 	fmt.Println("  dokito-cli process <json_file>                                 - Run processing only on JSON file")
 	fmt.Println("  dokito-cli upload <json_file>                                  - Run upload only on JSON file")
+	fmt.Println("  dokito-cli missing-govids [jurisdiction]                       - Get govids not currently in database")
 	fmt.Println("  dokito-cli env                                                 - Show environment configuration")
 	fmt.Println("")
 	fmt.Println("Intermediate Source Options:")
@@ -62,6 +65,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli pipeline --intermediate-source=raw_json 00-F-0229")
 	fmt.Println("  dokito-cli pipeline --intermediate-source=processed_json 00-F-0229")
 	fmt.Println("  dokito-cli scrape 00-F-0229")
+	fmt.Println("  dokito-cli missing-govids new_york_puc")
 	fmt.Println("  dokito-cli env")
 }
 
@@ -273,6 +277,37 @@ func RunUploadOnly() {
 	log.Printf("✅ Upload completed successfully")
 }
 
+func RunMissingGovIds() {
+	jurisdiction := "new_york_puc" // Default jurisdiction
+	if len(os.Args) >= 3 {
+		jurisdiction = strings.TrimSpace(os.Args[2])
+	}
+
+	log.Printf("🔍 Finding govids not in database for jurisdiction: %s", jurisdiction)
+
+	// Get binary paths
+	scraperPaths := core.GetScraperPaths()
+	dokitoPaths := core.GetDokitoPaths()
+
+	// Get missing govids
+	missingGovIds, err := pipelines.GetMissingGovIds(jurisdiction, scraperPaths, dokitoPaths)
+	if err != nil {
+		log.Printf("❌ Failed to get missing govids: %v", err)
+		os.Exit(1)
+	}
+
+	log.Printf("✅ Found %d govids not currently in database", len(missingGovIds))
+
+	// Print results as JSON
+	output, err := json.MarshalIndent(missingGovIds, "", "  ")
+	if err != nil {
+		log.Printf("❌ Failed to marshal results: %v", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(string(output))
+}
+
 func ShowEnvironment() {
 	fmt.Println("🔧 Environment Configuration:")
 	fmt.Println("")
@@ -290,6 +325,7 @@ func ShowEnvironment() {
 	fmt.Printf("  Process:  %s\n", getStatus(dokitoPaths.ProcessDocketsPath))
 	fmt.Printf("  Upload:   %s\n", getStatus(dokitoPaths.UploadDocketsPath))
 	fmt.Printf("  Download: %s\n", getStatus(dokitoPaths.DownloadAttachmentsPath))
+	fmt.Printf("  Database: %s\n", getStatus(dokitoPaths.DatabaseUtilsPath))
 
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
@@ -299,6 +335,7 @@ func ShowEnvironment() {
 	fmt.Printf("  DOKITO_PROCESS_DOCKETS_BINARY_PATH: %s\n", os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH"))
 	fmt.Printf("  DOKITO_UPLOAD_DOCKETS_BINARY_PATH: %s\n", os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH"))
 	fmt.Printf("  DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH: %s\n", os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"))
+	fmt.Printf("  DOKITO_DATABASE_UTILS_BINARY_PATH: %s\n", os.Getenv("DOKITO_DATABASE_UTILS_BINARY_PATH"))
 }
 
 func getStatus(path string) string {

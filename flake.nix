@@ -45,6 +45,7 @@
             export DOKITO_PROCESS_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/process-dockets"
             export DOKITO_UPLOAD_DOCKETS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/upload-dockets"
             export DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/download-attachments"
+            export DOKITO_DATABASE_UTILS_BINARY_PATH="${rustModule.packages.dokito-backend}/bin/database-utils"
             export BINARY_EXECUTION_PATH=$(pwd)
 
             # Set up Redis configuration for author caching
@@ -61,6 +62,7 @@
             echo "  Process: $DOKITO_PROCESS_DOCKETS_BINARY_PATH"
             echo "  Upload: $DOKITO_UPLOAD_DOCKETS_BINARY_PATH"
             echo "  Download: $DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"
+            echo "  Database: $DOKITO_DATABASE_UTILS_BINARY_PATH"
             echo "  Current Directory: $BINARY_EXECUTION_PATH"
             echo "  Redis URL: $REDIS_URL"
             echo "  Redis Data: $REDIS_DATA_DIR"

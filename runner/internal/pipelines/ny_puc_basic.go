@@ -3,12 +3,38 @@ package pipelines
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"runner/internal/core"
 	"runner/internal/storage"
 	"time"
 )
+
+func GetGovidFromJsonData(obj map[string]any) (string, error) {
+	idOptions := []string{"docket_govid", "case_govid", "docket_id"}
+
+	for _, key := range idOptions {
+		if val, ok := obj[key]; ok {
+			if str, ok := val.(string); ok && str != "" {
+				return str, nil
+			}
+		}
+	}
+
+	return "", errors.New("error: could not extract govid")
+}
+
+func GovidsFromJsonDataFiltered(list []map[string]any) []string {
+	results := []string{}
+	for _, obj := range list {
+		govid, err := GetGovidFromJsonData(obj)
+		if err == nil {
+			results = append(results, govid)
+		}
+	}
+	return results
+}
 
 // IntermediateSource represents the source for intermediate data retrieval
 type IntermediateSource string
