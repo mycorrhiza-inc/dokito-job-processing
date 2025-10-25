@@ -1,4 +1,3 @@
-
 import { Scraper } from "./pipeline";
 import {
   RawGenericDocket,
@@ -69,7 +68,9 @@ class NyPucScraper {
 
     if (useS3Source) {
       this.s3Backend = new S3StorageBackend();
-      console.error("S3 source mode enabled - will only scrape from S3 storage");
+      console.error(
+        "S3 source mode enabled - will only scrape from S3 storage",
+      );
     }
   }
 
@@ -445,7 +446,10 @@ class NyPucScraper {
         );
       }
 
-      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(url, stage);
+      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(
+        url,
+        stage,
+      );
       if (!snapshotResult) {
         throw new Error(
           `No S3 snapshot found for ${url} at stage ${stage}. ` +
@@ -458,10 +462,10 @@ class NyPucScraper {
 
       console.error(
         `Loaded HTML from S3 for ${url}\n` +
-        `  Stage: ${metadata.stage}\n` +
-        `  Saved at: ${metadata.saved_at}\n` +
-        `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
-        `  Size: ${metadata.file_size} bytes`
+          `  Stage: ${metadata.stage}\n` +
+          `  Saved at: ${metadata.saved_at}\n` +
+          `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
+          `  Size: ${metadata.file_size} bytes`,
       );
     } else {
       // EXISTING: Use browser navigation
@@ -506,7 +510,10 @@ class NyPucScraper {
             try {
               await context.close();
             } catch (closeError) {
-              console.error("Error closing context:", (closeError as Error).message);
+              console.error(
+                "Error closing context:",
+                (closeError as Error).message,
+              );
             }
           }
 
@@ -1545,10 +1552,17 @@ class NyPucScraper {
     mode: ScrapingMode,
   ): Promise<Partial<RawGenericDocket>[]> {
     // Validate that all dockets have case_govid
-    const validDockets = dockets.filter(d => d.case_govid && typeof d.case_govid === 'string' && d.case_govid.trim().length > 0);
+    const validDockets = dockets.filter(
+      (d) =>
+        d.case_govid &&
+        typeof d.case_govid === "string" &&
+        d.case_govid.trim().length > 0,
+    );
 
     if (validDockets.length !== dockets.length) {
-      console.warn(`Warning: ${dockets.length - validDockets.length} dockets missing case_govid, skipping them`);
+      console.warn(
+        `Warning: ${dockets.length - validDockets.length} dockets missing case_govid, skipping them`,
+      );
     }
 
     console.error(
@@ -1662,13 +1676,15 @@ class NyPucScraper {
     const $ = await this.getPage(url);
     const docketGovIds: string[] = [];
 
-    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each((i: number, row: any) => {
-      const cells = $(row).find("td");
-      const docketGovId = $(cells[4]).find("a").text().trim();
-      if (docketGovId) {
-        docketGovIds.push(docketGovId);
-      }
-    });
+    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each(
+      (i: number, row: any) => {
+        const cells = $(row).find("td");
+        const docketGovId = $(cells[4]).find("a").text().trim();
+        if (docketGovId) {
+          docketGovIds.push(docketGovId);
+        }
+      },
+    );
     const govid_set = new Set(docketGovIds);
 
     return [...govid_set]; // Return unique values
@@ -1714,7 +1730,7 @@ class NyPucScraper {
     }
 
     // Convert case numbers to docket objects
-    const dockets = caseNumbers.map(govId => ({ case_govid: govId }));
+    const dockets = caseNumbers.map((govId) => ({ case_govid: govId }));
 
     // Run full scraping pipeline for each case
     console.error(
@@ -1880,7 +1896,7 @@ async function runCustomScraping(
   // Determine which cases to scrape based on provided arguments
   if (options.govIds && options.govIds.length > 0) {
     // Explicit gov IDs provided - convert to docket objects
-    casesToScrape = options.govIds.map(govId => ({ case_govid: govId }));
+    casesToScrape = options.govIds.map((govId) => ({ case_govid: govId }));
     console.error(`Using ${options.govIds.length} explicitly provided gov IDs`);
   } else if (options.dateString) {
     // Single date provided
@@ -1908,7 +1924,9 @@ async function runCustomScraping(
       casesToScrape = await scraper.getAllCaseList();
       console.error(`Found ${casesToScrape.length} cases`);
     } else {
-      throw new Error("No cases specified. Use --gov-ids, --date, --begin-date/--end-date, --from-file, --today-filings, or --fetch-all-docket-metadata");
+      throw new Error(
+        "No cases specified. Use --gov-ids, --date, --begin-date/--end-date, --from-file, --today-filings, or --fetch-all-docket-metadata",
+      );
     }
   }
 
@@ -1917,7 +1935,9 @@ async function runCustomScraping(
   }
 
   // Now scrape the cases with the specified mode
-  console.error(`Scraping ${casesToScrape.length} cases in ${options.mode} mode`);
+  console.error(
+    `Scraping ${casesToScrape.length} cases in ${options.mode} mode`,
+  );
   const results = await scraper.scrapeByGovIds(casesToScrape, options.mode);
 
   console.error(`Scraped ${results.length} results in ${options.mode} mode`);

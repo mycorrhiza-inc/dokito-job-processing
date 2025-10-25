@@ -30,66 +30,6 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, Deserialize, JsonSchema)]
-#[repr(transparent)]
-pub struct FixedJurisdictionPurgePrevious(pub FixedJurisdiction);
-#[async_trait]
-impl ExecuteUserTask for FixedJurisdictionPurgePrevious {
-    async fn execute_task(self: Box<Self>) -> Result<Value, Value> {
-        let res = ingest_all_fixed_jurisdiction_data(self.0, true).await;
-        match res {
-            Ok(()) => {
-                info!("Nypuc ingest completed.");
-                Ok("Task Completed Successfully".into())
-            }
-            Err(err) => {
-                let err_debug = format!("{:?}", err);
-                tracing::error!(error= % err, error_debug= &err_debug[..500],"Encountered error in ny_ingest");
-                Err(err.to_string().into())
-            }
-        }
-    }
-    fn get_task_label(&self) -> &'static str {
-        "ingest_nypuc_purge_previous"
-    }
-    fn get_task_label_static() -> &'static str
-    where
-        Self: Sized,
-    {
-        "ingest_nypuc_purge_previous"
-    }
-}
-
-#[derive(Clone, Copy, Deserialize, JsonSchema)]
-#[repr(transparent)]
-pub struct GetMissingDocketsForFixedJurisdiction(pub FixedJurisdiction);
-#[async_trait]
-impl ExecuteUserTask for GetMissingDocketsForFixedJurisdiction {
-    async fn execute_task(self: Box<Self>) -> Result<Value, Value> {
-        let res = ingest_all_fixed_jurisdiction_data(self.0, false).await;
-        match res {
-            Ok(()) => {
-                info!("Nypuc ingest completed.");
-                Ok("Task Completed Successfully".into())
-            }
-            Err(err) => {
-                let err_debug = format!("{:?}", err);
-                tracing::error!(error= % err, error_debug= &err_debug[..500],"Encountered error in ny_ingest");
-                Err(err.to_string().into())
-            }
-        }
-    }
-    fn get_task_label(&self) -> &'static str {
-        "ingest_nypuc_get_missing_dockets"
-    }
-    fn get_task_label_static() -> &'static str
-    where
-        Self: Sized,
-    {
-        "ingest_nypuc_get_missing_dockets"
-    }
-}
-
 fn generate_hash(x: &impl Hash) -> u64 {
     let mut hasher = DefaultHasher::new();
     x.hash(&mut hasher);

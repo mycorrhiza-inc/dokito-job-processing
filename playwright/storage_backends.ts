@@ -29,19 +29,19 @@ export class S3StorageBackend implements StorageBackend {
   private metadataCache: Map<string, Record<string, any>> = new Map();
 
   constructor() {
-    const endpoint = process.env.S3_ENDPOINT_URL;
-    const accessKeyId = process.env.S3_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY;
-    const region = process.env.S3_REGION;
-    const bucketName = process.env.S3_BUCKET_NAME;
+    const endpoint = process.env.DIGITALOCEAN_S3_ENDPOINT;
+    const accessKeyId = process.env.DIGITALOCEAN_S3_ACCESS_KEY;
+    const secretAccessKey = process.env.DIGITALOCEAN_S3_SECRET_KEY;
+    const region = process.env.DIGITALOCEAN_S3_REGION;
+    const bucketName = process.env.DOKITO_S3_HTML_BUCKET;
 
     // Validate ALL required S3 configuration
     const missing: string[] = [];
-    if (!endpoint) missing.push("S3_ENDPOINT_URL");
-    if (!accessKeyId) missing.push("S3_ACCESS_KEY_ID");
-    if (!secretAccessKey) missing.push("S3_SECRET_ACCESS_KEY");
-    if (!region) missing.push("S3_REGION");
-    if (!bucketName) missing.push("S3_BUCKET_NAME");
+    if (!endpoint) missing.push("DIGITALOCEAN_S3_ENDPOINT");
+    if (!accessKeyId) missing.push("DIGITALOCEAN_S3_ACCESS_KEY");
+    if (!secretAccessKey) missing.push("DIGITALOCEAN_S3_SECRET_KEY");
+    if (!region) missing.push("DIGITALOCEAN_S3_REGION");
+    if (!bucketName) missing.push("DOKITO_S3_HTML_BUCKET");
 
     if (missing.length > 0) {
       throw new Error(

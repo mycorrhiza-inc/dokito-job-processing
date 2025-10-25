@@ -10,7 +10,7 @@ import (
 	"runner/internal/storage"
 )
 
-func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths ScraperBinaryPaths) ([]map[string]any, error) {
+func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths ScraperBinaryPaths, extraArgs ...string) ([]map[string]any, error) {
 	var binaryPath string
 	switch scraperType {
 	case NYPUC:
@@ -31,7 +31,14 @@ func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths Scra
 	defer cancel()
 
 	intermediateDir := storage.GetPlaywrightIntermediateDir()
-	cmd := exec.CommandContext(ctx, binaryPath, "--gov-ids", govID, "--mode", "all", "--intermediate-dir", intermediateDir)
+
+	// Build base arguments
+	args := []string{"--gov-ids", govID, "--mode", "all", "--intermediate-dir", intermediateDir}
+
+	// Append extra arguments if provided
+	args = append(args, extraArgs...)
+
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("scraper execution failed: %v", err)
@@ -46,7 +53,7 @@ func ExecuteScraperWithALLMode(govID string, scraperType ScraperType, paths Scra
 }
 
 // ExecuteScraperWithALLModeDebug runs scraper with real-time stdout streaming for debugging
-func ExecuteScraperWithALLModeDebug(govID string, scraperType ScraperType, paths ScraperBinaryPaths) ([]map[string]any, error) {
+func ExecuteScraperWithALLModeDebug(govID string, scraperType ScraperType, paths ScraperBinaryPaths, extraArgs ...string) ([]map[string]any, error) {
 	var binaryPath string
 	switch scraperType {
 	case NYPUC:
@@ -67,7 +74,14 @@ func ExecuteScraperWithALLModeDebug(govID string, scraperType ScraperType, paths
 	defer cancel()
 
 	intermediateDir := storage.GetPlaywrightIntermediateDir()
-	cmd := exec.CommandContext(ctx, binaryPath, "--gov-ids", govID, "--mode", "all", "--intermediate-dir", intermediateDir)
+
+	// Build base arguments
+	args := []string{"--gov-ids", govID, "--mode", "all", "--intermediate-dir", intermediateDir}
+
+	// Append extra arguments if provided
+	args = append(args, extraArgs...)
+
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	label := fmt.Sprintf("🔍 [%s]", scraperType)
 
 	// Use helper function for debug streaming

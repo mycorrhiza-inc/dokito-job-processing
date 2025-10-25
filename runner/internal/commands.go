@@ -43,50 +43,116 @@ func PrintUsage() {
 	fmt.Println("Dokito CLI - Debug tool for the job processing pipeline")
 	fmt.Println("")
 	fmt.Println("Usage:")
-	fmt.Println("  dokito-cli pipeline <gov_id> [--from-remote]  - Run the full pipeline")
-	fmt.Println("  dokito-cli scrape <gov_id>                    - Run scraper only and print results")
-	fmt.Println("  dokito-cli process <json_file>                - Run processing only on JSON file")
-	fmt.Println("  dokito-cli upload <json_file>                 - Run upload only on JSON file")
-	fmt.Println("  dokito-cli env                                - Show environment configuration")
+	fmt.Println("  dokito-cli pipeline [--intermediate-source=<source>] <gov_id>  - Run the full pipeline")
+	fmt.Println("  dokito-cli scrape <gov_id>                                     - Run scraper only and print results")
+	fmt.Println("  dokito-cli process <json_file>                                 - Run processing only on JSON file")
+	fmt.Println("  dokito-cli upload <json_file>                                  - Run upload only on JSON file")
+	fmt.Println("  dokito-cli env                                                 - Show environment configuration")
 	fmt.Println("")
-	fmt.Println("Options:")
-	fmt.Println("  --from-remote                                 - Skip scraping, retrieve data from S3 instead")
-	fmt.Println("  dokito-cli help                 - Show this help message")
+	fmt.Println("Intermediate Source Options:")
+	fmt.Println("  --intermediate-source=none           - Run full scraping (default)")
+	fmt.Println("  --intermediate-source=html           - Process from HTML snapshots in S3")
+	fmt.Println("  --intermediate-source=raw_json       - Retrieve from raw JSON objects in S3")
+	fmt.Println("  --intermediate-source=processed_json - Retrieve from processed JSON objects in S3")
 	fmt.Println("")
 	fmt.Println("Examples:")
 	fmt.Println("  dokito-cli pipeline 00-F-0229")
+	fmt.Println("  dokito-cli pipeline 00-F-0229 --intermediate-source=html")
+	fmt.Println("  dokito-cli pipeline --intermediate-source=html 00-F-0229")
+	fmt.Println("  dokito-cli pipeline --intermediate-source=raw_json 00-F-0229")
+	fmt.Println("  dokito-cli pipeline --intermediate-source=processed_json 00-F-0229")
 	fmt.Println("  dokito-cli scrape 00-F-0229")
 	fmt.Println("  dokito-cli env")
+}
+
+// parseIntermediateSource converts a string to IntermediateSource enum
+func parseIntermediateSource(source string) (pipelines.IntermediateSource, error) {
+	switch strings.ToLower(source) {
+	case "none", "":
+		return pipelines.IntermediateSourceNone, nil
+	case "html":
+		return pipelines.IntermediateSourceHTML, nil
+	case "raw_json", "raw-json":
+		return pipelines.IntermediateSourceRawJSON, nil
+	case "processed_json", "processed-json":
+		return pipelines.IntermediateSourceProcessedJSON, nil
+	default:
+		return "", fmt.Errorf("invalid intermediate source: %s. Valid options: none, html, raw_json, processed_json", source)
+	}
+}
+
+// parseCommandLineArgs parses command line arguments for the pipeline command
+func parseCommandLineArgs(args []string) (govID string, config pipelines.NYPUCPipelineConfig, err error) {
+	config = pipelines.NYPUCPipelineConfig{
+		DebugMode:          true, // Enable debug mode for CLI usage
+		IntermediateSource: pipelines.IntermediateSourceNone, // Default to no intermediate source
+	}
+
+	var foundGovID bool
+
+	// Parse all arguments, looking for flags and gov_id
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		if strings.HasPrefix(arg, "--intermediate-source=") {
+			sourceStr := strings.TrimPrefix(arg, "--intermediate-source=")
+			source, parseErr := parseIntermediateSource(sourceStr)
+			if parseErr != nil {
+				return "", config, parseErr
+			}
+			config.IntermediateSource = source
+		} else if !strings.HasPrefix(arg, "--") {
+			// This is not a flag, assume it's the gov_id
+			if foundGovID {
+				return "", config, fmt.Errorf("multiple gov_ids provided: %s and %s", govID, arg)
+			}
+			govID = strings.TrimSpace(arg)
+			foundGovID = true
+		} else {
+			return "", config, fmt.Errorf("unknown argument: %s", arg)
+		}
+	}
+
+	if !foundGovID {
+		return "", config, fmt.Errorf("gov_id required")
+	}
+
+	return govID, config, nil
 }
 
 func RunPipeline() {
 	if len(os.Args) < 3 {
 		fmt.Println("Error: gov_id required")
-		fmt.Println("Usage: dokito-cli pipeline <gov_id> [--from-remote]")
+		fmt.Println("Usage: dokito-cli pipeline [--intermediate-source=<source>] <gov_id>")
+		PrintUsage()
 		os.Exit(1)
 	}
 
-	govID := strings.TrimSpace(os.Args[2])
-
-	// Check for --from-remote flag
-	fromRemote := false
-	if len(os.Args) > 3 && os.Args[3] == "--from-remote" {
-		fromRemote = true
+	// Parse command line arguments
+	govID, config, err := parseCommandLineArgs(os.Args[2:])
+	if err != nil {
+		fmt.Printf("❌ Error parsing arguments: %v\n", err)
+		fmt.Println("")
+		PrintUsage()
+		os.Exit(1)
 	}
 
-	// Execute the shared NY PUC pipeline with debug mode enabled for CLI
-	config := pipelines.NYPUCPipelineConfig{
-		DebugMode:  true, // Enable debug mode for CLI usage
-		FromRemote: fromRemote, // Use remote data if specified
-	}
+	// Show configuration for transparency
+	fmt.Printf("🔧 Pipeline Configuration:\n")
+	fmt.Printf("  Gov ID: %s\n", govID)
+	fmt.Printf("  Intermediate Source: %s\n", config.IntermediateSource)
+	fmt.Printf("  Debug Mode: %t\n", config.DebugMode)
+	fmt.Println("")
+
+	// Execute the shared NY PUC pipeline
 	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(govID, config)
 	if err != nil {
 		log.Printf("❌ Pipeline failed: %v", err)
 		os.Exit(1)
 	}
 
-	log.Printf("🎉 Full pipeline completed successfully for %s. Scraped %d items, processed %d items.",
-		result.GovID, result.ScrapeCount, result.ProcessCount)
+	log.Printf("🎉 Full pipeline completed successfully for %s using %s source. Scraped %d items, processed %d items.",
+		result.GovID, config.IntermediateSource, result.ScrapeCount, result.ProcessCount)
 }
 
 func RunScrapeOnly() {
