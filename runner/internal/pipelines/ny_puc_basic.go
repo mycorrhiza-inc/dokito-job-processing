@@ -5,15 +5,27 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path"
 	"runner/internal/core"
 	"runner/internal/storage"
 	"time"
 )
 
+// IntermediateSource represents the source for intermediate data retrieval
+type IntermediateSource string
+
+const (
+	IntermediateSourceNone         IntermediateSource = "none"         // No intermediate source, run full scraping
+	IntermediateSourceHTML         IntermediateSource = "html"         // Retrieve from HTML snapshots in S3/local storage
+	IntermediateSourceRawJSON      IntermediateSource = "raw_json"     // Retrieve from raw JSON objects storage
+	IntermediateSourceProcessedJSON IntermediateSource = "processed_json" // Retrieve from processed JSON objects storage
+)
+
 // NYPUCPipelineConfig contains configuration options for pipeline execution
 type NYPUCPipelineConfig struct {
-	DebugMode  bool // Enable real-time subprocess output streaming
-	FromRemote bool // Skip scraping and retrieve data from S3 instead
+	DebugMode          bool               // Enable real-time subprocess output streaming
+	FromRemote         bool               // Skip scraping and retrieve data from S3 instead (deprecated, use IntermediateSource)
+	IntermediateSource IntermediateSource // Source for intermediate data retrieval
 }
 
 // NYPUCPipelineResult contains the results from the NY PUC pipeline execution
@@ -38,6 +50,64 @@ func (e NYPUCPipelineError) Error() string {
 		return fmt.Sprintf("%s failed: %s: %v", e.Step, e.Message, e.Err)
 	}
 	return fmt.Sprintf("%s failed: %s", e.Step, e.Message)
+}
+
+// retrieveIntermediateData retrieves data from the specified intermediate source
+func retrieveIntermediateData(ctx context.Context, govID string, source IntermediateSource, config NYPUCPipelineConfig) ([]map[string]any, error) {
+	switch source {
+	case IntermediateSourceNone:
+		return nil, fmt.Errorf("IntermediateSourceNone should not be used for data retrieval")
+
+	case IntermediateSourceRawJSON:
+		log.Printf("☁️ Retrieving raw JSON data from S3 for %s", govID)
+		rawLocation := storage.RawDocketLocation{
+			JurisdictionInfo: storage.NypucJurisdictionInfo,
+			DocketGovID:      govID,
+		}
+		var rawData map[string]any
+		if err := storage.RetriveJSONFromRemoteAndUpdateLocal(ctx, rawLocation, &rawData); err != nil {
+			return nil, fmt.Errorf("failed to retrieve raw JSON data: %v", err)
+		}
+		return []map[string]any{rawData}, nil
+
+	case IntermediateSourceProcessedJSON:
+		log.Printf("☁️ Retrieving processed JSON data from S3 for %s", govID)
+		processedLocation := storage.ProcessedDocketLocation{
+			JurisdictionInfo: storage.NypucJurisdictionInfo,
+			DocketGovID:      govID,
+		}
+		var processedData map[string]any
+		if err := storage.RetriveJSONFromRemoteAndUpdateLocal(ctx, processedLocation, &processedData); err != nil {
+			return nil, fmt.Errorf("failed to retrieve processed JSON data: %v", err)
+		}
+		return []map[string]any{processedData}, nil
+
+	case IntermediateSourceHTML:
+		log.Printf("🌐 Running scraper with --source-s3 flag for HTML snapshots for %s", govID)
+
+		// Get binary paths and scraper type
+		scraperPaths := core.GetScraperPaths()
+		mapping := core.GetDefaultGovIDMapping()
+		scraperType := mapping.GetScraperForGovID(govID)
+
+		// Execute scraper with --source-s3 flag to read from HTML snapshots
+		var scrapeResults []map[string]any
+		var err error
+
+		if config.DebugMode {
+			scrapeResults, err = core.ExecuteScraperWithS3SourceDebug(govID, scraperType, scraperPaths)
+		} else {
+			scrapeResults, err = core.ExecuteScraperWithS3Source(govID, scraperType, scraperPaths)
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to process HTML snapshots with --source-s3: %v", err)
+		}
+		return scrapeResults, nil
+
+	default:
+		return nil, fmt.Errorf("unknown intermediate source: %s", source)
+	}
 }
 
 // ExecuteNYPUCBasicPipeline runs the complete NY PUC pipeline for a given government ID

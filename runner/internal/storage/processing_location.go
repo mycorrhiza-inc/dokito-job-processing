@@ -89,3 +89,36 @@ func (processedDocket ProcessedDocketLocation) GenerateCannonicalS3Path() S3Loca
 
 	return baseS3Location
 }
+
+// HTMLSnapshotLocation represents the location of HTML snapshots for intermediate retrieval
+type HTMLSnapshotLocation struct {
+	JurisdictionInfo JurisdictionInfo
+	DocketGovID      string
+}
+
+func (htmlLocation HTMLSnapshotLocation) GenerateCannonicalLocalPath() string {
+	basePath := GetPlaywrightIntermediateDir()
+	return path.Join(basePath,
+		"raw",
+		htmlLocation.JurisdictionInfo.Country,
+		htmlLocation.JurisdictionInfo.State,
+		htmlLocation.JurisdictionInfo.Jurisdictrion,
+		"documents.dps.ny.gov", // hostname for NY PUC
+		"public",
+		"MatterManagement",
+	)
+}
+
+func (htmlLocation HTMLSnapshotLocation) GenerateCannonicalS3Path() S3Location {
+	key := path.Join(
+		"raw",
+		htmlLocation.JurisdictionInfo.Country,
+		htmlLocation.JurisdictionInfo.State,
+		htmlLocation.JurisdictionInfo.Jurisdictrion,
+		"documents.dps.ny.gov", // hostname for NY PUC
+		"public",
+		"MatterManagement",
+	)
+	baseS3Location, _ := NewOpenscrapersBucketLocation(key)
+	return baseS3Location
+}
