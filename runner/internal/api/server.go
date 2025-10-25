@@ -14,8 +14,12 @@ func SetupRoutes() *http.ServeMux {
 	// Health check
 	mux.HandleFunc("/api/health", HandleHealth)
 
-	// Full pipeline endpoint
+	// Pipeline endpoints
 	mux.HandleFunc("/api/pipeline/full", HandleFullPipeline)
+	mux.HandleFunc("/api/pipeline/async", HandleAsyncPipeline)
+
+	// Queue management endpoints
+	mux.HandleFunc("/api/queue/status", HandleQueueStatus)
 
 	// Swagger documentation
 	mux.Handle("/swagger/", httpSwagger.Handler(

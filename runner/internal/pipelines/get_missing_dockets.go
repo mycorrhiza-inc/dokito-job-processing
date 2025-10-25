@@ -60,17 +60,19 @@ func ExecuteDatabaseUtilsListDocketIds(jurisdiction string, paths core.DokitoBin
 	return govids, nil
 }
 
-// GetMissingGovIds returns a slice of govids that are not currently in the database
-func GetMissingGovIds(jurisdiction string, scraperPaths core.ScraperBinaryPaths, dokitoPaths core.DokitoBinaryPaths) ([]string, error) {
-	// Fetch all metadata from the scraper
+// GetMissingGovIds returns a slice of NY PUC govids that are not currently in the database
+// Note: This function only works for new_york_puc jurisdiction since metadata fetching
+// is only implemented for the NY PUC scraper
+func GetMissingGovIds(scraperPaths core.ScraperBinaryPaths, dokitoPaths core.DokitoBinaryPaths) ([]string, error) {
+	// Fetch all metadata from the NY PUC scraper
 	allMetadata, err := ExecuteMetadataFetcher(scraperPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch metadata: %v", err)
 	}
 	allGovIds := GovidsFromJsonDataFiltered(allMetadata)
 
-	// Get govids currently in database
-	dbGovIds, err := ExecuteDatabaseUtilsListDocketIds(jurisdiction, dokitoPaths)
+	// Get govids currently in database for NY PUC jurisdiction
+	dbGovIds, err := ExecuteDatabaseUtilsListDocketIds("new_york_puc", dokitoPaths)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database govids: %v", err)
 	}

@@ -58,6 +58,21 @@ schema = 3
   [mod."github.com/aws/smithy-go"]
     version = "v1.23.1"
     hash = "sha256-n6VrGZZf5CJ6Z3sssV3vNjO3AJXXGmGkmh0Hd1zHXu4="
+  [mod."github.com/bsm/redislock"]
+    version = "v0.7.2"
+    hash = "sha256-nrTd0bcjPMw0EdkFY+z9AOxyEvo8r3ghOHG+KwKEGVQ="
+  [mod."github.com/capnm/sysinfo"]
+    version = "v0.0.0-20130621111458-5909a53897f3"
+    hash = "sha256-OPnjnMZGWraqYZCT12+GHWPqxxpqBiJQmIu6f9EHeYU="
+  [mod."github.com/cespare/xxhash/v2"]
+    version = "v2.1.2"
+    hash = "sha256-YV9SmXDtmmgQylQUfrUgQLAPfqYexcHxegMBT+IX9qM="
+  [mod."github.com/dgryski/go-farm"]
+    version = "v0.0.0-20200201041132-a6ae2369ad13"
+    hash = "sha256-aOMlPwFY36bLiiIx4HonbCYRAhagk5N6HAWN7Ygif+E="
+  [mod."github.com/dgryski/go-rendezvous"]
+    version = "v0.0.0-20200823014737-9f7001d12a5f"
+    hash = "sha256-n/7xo5CQqo4yLaWMSzSN1Muk/oqK6O5dgDOFWapeDUI="
   [mod."github.com/go-openapi/jsonpointer"]
     version = "v0.19.5"
     hash = "sha256-rLyvUdTMeQGeWiVsz2ZeyyFjHomeqd0x+ZR77mxi8Ss="
@@ -70,9 +85,24 @@ schema = 3
   [mod."github.com/go-openapi/swag"]
     version = "v0.19.15"
     hash = "sha256-NWIJ5GDWMbRc9r8ZPy7PiA7lnlTWYgM5NucwRhkP3zs="
+  [mod."github.com/go-redis/redis/v8"]
+    version = "v8.11.5"
+    hash = "sha256-KhVE/KR5oUCOQ42Hk7J7oa99A1Gu4+KJYknhgYI2G6w="
+  [mod."github.com/go-redis/redis_rate/v9"]
+    version = "v9.1.2"
+    hash = "sha256-0YClXU5W4+dZJfAz3cA76aPa5i2TfGGwYJ3K10/oSX0="
+  [mod."github.com/google/uuid"]
+    version = "v1.3.0"
+    hash = "sha256-QoR55eBtA94T2tBszyxfDtO7/pjZZSGb5vm7U0Xhs0Y="
+  [mod."github.com/hashicorp/golang-lru"]
+    version = "v0.5.4"
+    hash = "sha256-1skUMZX+iIf66J1TBVYGWO1OWwQcaoXut3mne331q+k="
   [mod."github.com/josharian/intern"]
     version = "v1.0.0"
     hash = "sha256-LJR0QE2vOQ2/2shBbO5Yl8cVPq+NFrE3ers0vu9FRP0="
+  [mod."github.com/klauspost/compress"]
+    version = "v1.15.1"
+    hash = "sha256-aHpB6o+cCu0Sv8cNBqetnpX5Xb4/Q3uDiWOGBf9pfj0="
   [mod."github.com/mailru/easyjson"]
     version = "v0.7.6"
     hash = "sha256-lObieB06Ep7xL3Bbc1sxWpAeqH9VH2LXsPIc9uueuXs="
@@ -85,6 +115,15 @@ schema = 3
   [mod."github.com/swaggo/swag"]
     version = "v1.16.3"
     hash = "sha256-BBzm733YaghTzoSuKVVwF/9ae8ifP849GVsLFd9It8Q="
+  [mod."github.com/vmihailenco/msgpack/v5"]
+    version = "v5.3.5"
+    hash = "sha256-Uj5xRZbtxE8evniQPuBVkxkEdMa/H/pt9s84J16swm8="
+  [mod."github.com/vmihailenco/tagparser/v2"]
+    version = "v2.0.0"
+    hash = "sha256-M9QyaKhSmmYwsJk7gkjtqu9PuiqZHSmTkous8VWkWY0="
+  [mod."github.com/vmihailenco/taskq/v3"]
+    version = "v3.2.9"
+    hash = "sha256-BTWNUsqtm09aF3cAkQPE9puTorHeANcWtgL7pWTsrd0="
   [mod."golang.org/x/net"]
     version = "v0.17.0"
     hash = "sha256-qRawHWLSsJ06QNbLhUWPXGVSO1eaioeC9xZlUEWN8J8="

@@ -49,7 +49,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli scrape <gov_id>                                     - Run scraper only and print results")
 	fmt.Println("  dokito-cli process <json_file>                                 - Run processing only on JSON file")
 	fmt.Println("  dokito-cli upload <json_file>                                  - Run upload only on JSON file")
-	fmt.Println("  dokito-cli missing-govids [jurisdiction]                       - Get govids not currently in database")
+	fmt.Println("  dokito-cli missing-govids                                      - Get NY PUC govids not currently in database")
 	fmt.Println("  dokito-cli env                                                 - Show environment configuration")
 	fmt.Println("")
 	fmt.Println("Intermediate Source Options:")
@@ -65,7 +65,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli pipeline --intermediate-source=raw_json 00-F-0229")
 	fmt.Println("  dokito-cli pipeline --intermediate-source=processed_json 00-F-0229")
 	fmt.Println("  dokito-cli scrape 00-F-0229")
-	fmt.Println("  dokito-cli missing-govids new_york_puc")
+	fmt.Println("  dokito-cli missing-govids")
 	fmt.Println("  dokito-cli env")
 }
 
@@ -278,19 +278,14 @@ func RunUploadOnly() {
 }
 
 func RunMissingGovIds() {
-	jurisdiction := "new_york_puc" // Default jurisdiction
-	if len(os.Args) >= 3 {
-		jurisdiction = strings.TrimSpace(os.Args[2])
-	}
-
-	log.Printf("🔍 Finding govids not in database for jurisdiction: %s", jurisdiction)
+	log.Printf("🔍 Finding NY PUC govids not in database")
 
 	// Get binary paths
 	scraperPaths := core.GetScraperPaths()
 	dokitoPaths := core.GetDokitoPaths()
 
 	// Get missing govids
-	missingGovIds, err := pipelines.GetMissingGovIds(jurisdiction, scraperPaths, dokitoPaths)
+	missingGovIds, err := pipelines.GetMissingGovIds(scraperPaths, dokitoPaths)
 	if err != nil {
 		log.Printf("❌ Failed to get missing govids: %v", err)
 		os.Exit(1)
