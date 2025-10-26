@@ -3,6 +3,8 @@ use clap::{Parser, Subcommand};
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
+use rust_data_transforms::indexes::attachment_url_index::regenrate_url_attach_index;
+use rust_data_transforms::indexes::s3_storage_and_saving::generate_attachment_url_index;
 use tracing_subscriber;
 use sqlx::{query_as, FromRow};
 use serde_json;
@@ -26,6 +28,25 @@ async fn list_docket_ids_for_jurisdiction(fixed_jur: FixedJurisdiction) -> Resul
     Ok(docket_ids.into_iter().map(|d| d.docket_govid).collect())
 }
 
+async fn generate_and_upload_attachment_index() -> Result<()> {
+    tracing::info!("Starting attachment index generation");
+
+    // Generate the attachment index
+    let attach_index = generate_attachment_url_index().await?;
+    tracing::info!("Generated attachment index with {} entries", attach_index.len());
+
+    // Upload to Redis and backup to S3 (this function handles both)
+    regenrate_url_attach_index().await?;
+    tracing::info!("Successfully uploaded attachment index to Redis and S3");
+
+    // Convert to JSON and print to stdout for extra safety
+    let json_output = serde_json::to_string_pretty(&attach_index)?;
+    println!("{}", json_output);
+
+    tracing::info!("Attachment index generation and upload completed successfully");
+    Ok(())
+}
+
 #[derive(Parser)]
 #[command(name = "database-utils")]
 #[command(about = "Database utility commands for managing dokito database schemas")]
@@ -46,6 +67,8 @@ enum Commands {
         #[arg(long, value_enum, help = "Fixed jurisdiction to list docket IDs for")]
         fixed_jur: FixedJurisdiction,
     },
+    /// Generate attachment URL index, upload to Redis, backup to S3, and print JSON to stdout
+    GenerateAttachmentIndex,
 }
 
 #[tokio::main]
@@ -73,6 +96,9 @@ async fn main() -> Result<()> {
 
             let json_output = serde_json::to_string(&docket_ids)?;
             println!("{}", json_output);
+        }
+        Commands::GenerateAttachmentIndex => {
+            generate_and_upload_attachment_index().await?;
         }
     }
 
