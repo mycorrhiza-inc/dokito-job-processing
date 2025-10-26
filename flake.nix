@@ -78,7 +78,7 @@
 
             # Set defaults for public variables and log when using defaults
             echo "📝 Public environment variables:"
-            ${builtins.concatStringsSep "\n" (builtins.attrNames publicEnvVars |> map (var: let
+            ${builtins.concatStringsSep "\n" (map (var: let
               defaultValue = publicEnvVars.${var};
             in ''
               if [ -z "''${${var}:-}" ]; then
@@ -87,7 +87,7 @@
               else
                 echo "   ${var}: Using custom value (''${${var}})"
               fi
-            ''))}
+            '') (builtins.attrNames publicEnvVars))}
 
             echo "✅ All secret environment variables are set"
             echo ""
