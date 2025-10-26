@@ -15,6 +15,40 @@ import (
 	"strings"
 )
 
+// tryReadMetadataFromStdin attempts to read metadata from stdin
+// Returns (metadata, true) if stdin has data, (nil, false) if no stdin data
+func tryReadMetadataFromStdin() ([]map[string]any, bool) {
+	// Check if there's data from stdin
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		log.Printf("❌ Failed to check stdin: %v", err)
+		os.Exit(1)
+	}
+
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		// Data is being piped in via stdin
+		log.Printf("📥 Reading metadata from stdin...")
+
+		stdinData, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			log.Printf("❌ Failed to read from stdin: %v", err)
+			os.Exit(1)
+		}
+
+		// Parse the JSON metadata from stdin
+		var metadata []map[string]any
+		if err := json.Unmarshal(stdinData, &metadata); err != nil {
+			log.Printf("❌ Failed to parse stdin JSON: %v", err)
+			os.Exit(1)
+		}
+
+		log.Printf("📋 Using %d metadata records from stdin", len(metadata))
+		return metadata, true
+	}
+
+	return nil, false
+}
+
 func RunCLI() {
 	if len(os.Args) < 2 {
 		PrintUsage()
@@ -56,7 +90,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli process <json_file>                                 - Run processing only on JSON file")
 	fmt.Println("  dokito-cli upload <json_file>                                  - Run upload only on JSON file")
 	fmt.Println("  dokito-cli missing-govids                                      - Get NY PUC govids not currently in database (accepts metadata via stdin)")
-	fmt.Println("  dokito-cli bulk-queue [--limit=N] [--source=<source>] [--no-debug] - Queue random missing govids for processing (debug on by default)")
+	fmt.Println("  dokito-cli bulk-queue [--limit=N] [--source=<source>] [--no-debug] - Queue random missing govids for processing (debug on by default, accepts metadata via stdin)")
 	fmt.Println("  dokito-cli env                                                 - Show environment configuration")
 	fmt.Println("")
 	fmt.Println("Intermediate Source Options:")
@@ -76,6 +110,7 @@ func PrintUsage() {
 	fmt.Println("  cat metadata.json | dokito-cli missing-govids")
 	fmt.Println("  dokito-cli bulk-queue --limit=500 --source=html")
 	fmt.Println("  dokito-cli bulk-queue --limit=30 --source=html --no-debug")
+	fmt.Println("  cat metadata.json | dokito-cli bulk-queue --limit=100")
 	fmt.Println("  dokito-cli env")
 }
 
@@ -305,32 +340,8 @@ func RunMissingGovIds() {
 	var missingGovIds []string
 	var err error
 
-	// Check if there's data from stdin
-	stat, err := os.Stdin.Stat()
-	if err != nil {
-		log.Printf("❌ Failed to check stdin: %v", err)
-		os.Exit(1)
-	}
-
-	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		// Data is being piped in via stdin
-		log.Printf("📥 Reading metadata from stdin...")
-
-		stdinData, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			log.Printf("❌ Failed to read from stdin: %v", err)
-			os.Exit(1)
-		}
-
-		// Parse the JSON metadata from stdin
-		var metadata []map[string]any
-		if err := json.Unmarshal(stdinData, &metadata); err != nil {
-			log.Printf("❌ Failed to parse stdin JSON: %v", err)
-			os.Exit(1)
-		}
-
-		log.Printf("📋 Using %d metadata records from stdin", len(metadata))
-
+	// Try to read metadata from stdin
+	if metadata, hasStdin := tryReadMetadataFromStdin(); hasStdin {
 		// Get missing govids using provided metadata
 		missingGovIds, err = pipelines.GetMissingGovIdsFromMetadata(ctx, metadata)
 		if err != nil {
@@ -438,6 +449,12 @@ func RunBulkQueue() {
 	}
 	ctx := core.WithExecutionConfig(context.Background(), config)
 
+	// Try to read metadata from stdin
+	metadata, hasStdin := tryReadMetadataFromStdin()
+	if hasStdin {
+		log.Printf("📤 Bulk queue operation will use metadata from stdin")
+	}
+
 	// Initialize queues first
 	if err := worker.InitializeQueues(); err != nil {
 		log.Printf("❌ Failed to initialize task queues: %v", err)
@@ -447,8 +464,14 @@ func RunBulkQueue() {
 	// Register tasks
 	worker.RegisterTasks()
 
-	// Execute bulk queue operation
-	result, err := worker.BulkQueueMissingGovIds(ctx, limit, intermediateSource)
+	// Execute bulk queue operation with optional metadata
+	var result *worker.BulkQueueResult
+	var err error
+	if hasStdin {
+		result, err = worker.BulkQueueMissingGovIdsFromMetadata(ctx, limit, intermediateSource, metadata)
+	} else {
+		result, err = worker.BulkQueueMissingGovIds(ctx, limit, intermediateSource)
+	}
 	if err != nil {
 		log.Printf("❌ Bulk queue operation failed: %v", err)
 		os.Exit(1)

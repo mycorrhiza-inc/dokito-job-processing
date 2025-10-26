@@ -277,6 +277,85 @@ func BulkQueueMissingGovIds(ctx context.Context, limit int, intermediateSource p
 	return result, nil
 }
 
+// BulkQueueMissingGovIdsFromMetadata finds missing govids from provided metadata and queues a random subset for processing
+func BulkQueueMissingGovIdsFromMetadata(ctx context.Context, limit int, intermediateSource pipelines.IntermediateSource, metadata []map[string]any) (*BulkQueueResult, error) {
+	if Client == nil {
+		return nil, ErrQueueNotInitialized
+	}
+
+	log.Printf("🔍 [Bulk Queue] Finding missing govids from provided metadata...")
+
+	// Get missing govids using provided metadata
+	missingGovIds, err := pipelines.GetMissingGovIdsFromMetadata(ctx, metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get missing govids from metadata: %w", err)
+	}
+
+	totalMissing := len(missingGovIds)
+	log.Printf("📊 [Bulk Queue] Found %d missing govids from metadata", totalMissing)
+
+	if totalMissing == 0 {
+		return &BulkQueueResult{
+			TotalMissing: 0,
+			Queued:       0,
+			QueuedGovIds: []string{},
+			Message:      "No missing govids found - all dockets from metadata are already in the database",
+		}, nil
+	}
+
+	// Randomize the order
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(missingGovIds), func(i, j int) {
+		missingGovIds[i], missingGovIds[j] = missingGovIds[j], missingGovIds[i]
+	})
+
+	// Apply limit
+	toQueue := missingGovIds
+	if limit > 0 && limit < len(missingGovIds) {
+		toQueue = missingGovIds[:limit]
+		log.Printf("📋 [Bulk Queue] Limiting to %d govids (from %d total missing)", limit, totalMissing)
+	}
+
+	// Queue the tasks
+	var queuedGovIds []string
+	var queueErrors []string
+
+	log.Printf("📤 [Bulk Queue] Queueing %d pipeline tasks...", len(toQueue))
+
+	for i, govID := range toQueue {
+		_, err := EnqueuePipelineTask(ctx, govID, intermediateSource)
+		if err != nil {
+			log.Printf("⚠️  [Bulk Queue] Failed to queue %s: %v", govID, err)
+			queueErrors = append(queueErrors, fmt.Sprintf("%s: %v", govID, err))
+			continue
+		}
+
+		queuedGovIds = append(queuedGovIds, govID)
+
+		// Log progress every 100 items
+		if (i+1)%100 == 0 {
+			log.Printf("📊 [Bulk Queue] Progress: %d/%d queued", i+1, len(toQueue))
+		}
+	}
+
+	result := &BulkQueueResult{
+		TotalMissing: totalMissing,
+		Queued:       len(queuedGovIds),
+		QueuedGovIds: queuedGovIds,
+		Errors:       queueErrors,
+	}
+
+	if len(queueErrors) > 0 {
+		result.Message = fmt.Sprintf("Queued %d out of %d govids from metadata. %d errors occurred.",
+			len(queuedGovIds), len(toQueue), len(queueErrors))
+	} else {
+		result.Message = fmt.Sprintf("Successfully queued %d govids from metadata for processing.", len(queuedGovIds))
+	}
+
+	log.Printf("✅ [Bulk Queue] Completed from metadata: %d queued, %d errors", len(queuedGovIds), len(queueErrors))
+	return result, nil
+}
+
 // BulkQueueResult represents the result of a bulk queueing operation
 type BulkQueueResult struct {
 	TotalMissing int      `json:"total_missing"`
