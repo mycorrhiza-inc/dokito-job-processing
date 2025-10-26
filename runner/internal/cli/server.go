@@ -17,7 +17,8 @@ import (
 )
 
 var (
-	serverPort int
+	serverPort        int
+	serverConcurrency int
 )
 
 // serverCmd represents the server command
@@ -28,7 +29,8 @@ var serverCmd = &cobra.Command{
 The server provides REST endpoints for pipeline operations, queue management,
 and health monitoring.`,
 	Example: `  dokito-cli server --port=8080
-  dokito-cli server --port=3000 --debug`,
+  dokito-cli server --port=3000 --debug
+  dokito-cli server --port=8080 --concurrency=15`,
 	Args: cobra.NoArgs,
 	RunE: runServer,
 }
@@ -38,6 +40,7 @@ func init() {
 
 	// Server-specific flags
 	serverCmd.Flags().IntVar(&serverPort, "port", 8080, "Port to run the server on")
+	serverCmd.Flags().IntVar(&serverConcurrency, "concurrency", 5, "Number of concurrent workers for background processing")
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
@@ -48,6 +51,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Set global debug mode for worker tasks
 	worker.SetGlobalDebugMode(debugMode)
+
+	// Set worker concurrency from command line flag
+	worker.SetWorkerConcurrency(serverConcurrency)
 
 	// Initialize background task queues
 	log.Printf("🔧 Initializing task queues...")

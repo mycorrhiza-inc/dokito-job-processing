@@ -53,6 +53,20 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH: %s\n", os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"))
 	fmt.Printf("  DOKITO_DATABASE_UTILS_BINARY_PATH: %s\n", os.Getenv("DOKITO_DATABASE_UTILS_BINARY_PATH"))
 
+	fmt.Println("")
+	fmt.Println("Worker Configuration:")
+	workerConcurrency := os.Getenv("DOKITO_WORKER_CONCURRENCY")
+	if workerConcurrency == "" {
+		workerConcurrency = "5 (default)"
+	}
+	fmt.Printf("  DOKITO_WORKER_CONCURRENCY: %s\n", workerConcurrency)
+
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://127.0.0.1:6379 (default)"
+	}
+	fmt.Printf("  REDIS_URL: %s\n", redisURL)
+
 	return nil
 }
 

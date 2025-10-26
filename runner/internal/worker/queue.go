@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/hibiken/asynq"
 )
@@ -20,6 +21,9 @@ var (
 
 	// GlobalDebugMode controls whether debug logging is enabled globally for server mode
 	GlobalDebugMode bool
+
+	// WorkerConcurrency stores the current concurrency setting
+	WorkerConcurrency int
 )
 
 // SetGlobalDebugMode sets the global debug mode for server operations
@@ -27,6 +31,13 @@ func SetGlobalDebugMode(enabled bool) {
 	GlobalDebugMode = enabled
 	if enabled {
 		log.Printf("🐛 [Worker] Global debug mode enabled - subprocess logs will be shown")
+	}
+}
+
+// SetWorkerConcurrency sets the number of concurrent workers
+func SetWorkerConcurrency(concurrency int) {
+	if concurrency > 0 {
+		WorkerConcurrency = concurrency
 	}
 }
 
@@ -38,6 +49,20 @@ func InitializeQueues() error {
 		redisURL = "redis://127.0.0.1:6379"
 	}
 
+	// Set default concurrency if not already set
+	if WorkerConcurrency == 0 {
+		WorkerConcurrency = 5 // Default to 5 workers
+
+		// Check environment variable for override
+		if concurrencyStr := os.Getenv("DOKITO_WORKER_CONCURRENCY"); concurrencyStr != "" {
+			if concurrency, err := strconv.Atoi(concurrencyStr); err == nil && concurrency > 0 {
+				WorkerConcurrency = concurrency
+			} else {
+				log.Printf("⚠️  Invalid DOKITO_WORKER_CONCURRENCY value '%s', using default: %d", concurrencyStr, WorkerConcurrency)
+			}
+		}
+	}
+
 	// Parse Redis connection options
 	redisOpt, err := asynq.ParseRedisURI(redisURL)
 	if err != nil {
@@ -47,9 +72,9 @@ func InitializeQueues() error {
 	// Create asynq client for enqueuing tasks
 	Client = asynq.NewClient(redisOpt)
 
-	// Create asynq server for processing tasks with 5 concurrent workers
+	// Create asynq server for processing tasks with configurable concurrent workers
 	Server = asynq.NewServer(redisOpt, asynq.Config{
-		Concurrency: 5,
+		Concurrency: WorkerConcurrency,
 		Queues: map[string]int{
 			"default": 1, // All tasks go to default queue with priority 1
 		},
@@ -63,7 +88,7 @@ func InitializeQueues() error {
 	ServeMux = asynq.NewServeMux()
 
 	log.Printf("✅ Task queues initialized with Redis at %s", redisURL)
-	log.Printf("📋 Asynq server configured with 5 concurrent workers")
+	log.Printf("📋 Asynq server configured with %d concurrent workers", WorkerConcurrency)
 
 	return nil
 }
@@ -116,7 +141,7 @@ func GetQueueStats() map[string]interface{} {
 	return map[string]interface{}{
 		"status":      "active",
 		"queue_name":  "default",
-		"concurrency": 5,
+		"concurrency": WorkerConcurrency,
 		"library":     "asynq",
 	}
 }
