@@ -1157,8 +1157,9 @@ class NyPucScraper {
         ).toString();
         const fileName = $(docCells[6]).text().trim();
 
+        const documentType = $(docCells[2]).text().trim();
+
         if (!filingsMap.has(filingNo)) {
-          const documentType = $(docCells[2]).text().trim();
           const dateFiled = $(docCells[1]).text().trim();
           const authors = $(docCells[4]).text().trim();
 
@@ -1170,7 +1171,7 @@ class NyPucScraper {
             individual_authors: [],
             organization_authors_blob: authors,
             individual_authors_blob: "",
-            filing_type: documentType,
+            filing_type: "",
             description: "",
             attachments: [],
             extra_metadata: { fileName },
@@ -1185,7 +1186,7 @@ class NyPucScraper {
             name: documentTitle,
             document_extension: fileName.split(".").pop() || "",
             url: attachmentUrl,
-            attachment_type: "primary",
+            attachment_type: documentType,
             attachment_subtype: "",
             extra_metadata: { fileName },
             attachment_govid: "",
