@@ -8,7 +8,7 @@ pub static OPENSCRAPERS_S3_OBJECT_BUCKET: LazyLock<String> = LazyLock::new(|| {
 
 struct DigitalOceanS3Envs {}
 impl S3EnvNames for DigitalOceanS3Envs {
-    const REGION_ENV: &str = "DIGITALOCEAN_S3_CLOUD_REGION";
+    const REGION_ENV: &str = "DIGITALOCEAN_S3_REGION";
     const ENDPOINT_ENV: &str = "DIGITALOCEAN_S3_ENDPOINT";
     const ACCESS_ENV: &str = "DIGITALOCEAN_S3_ACCESS_KEY";
     const SECRET_ENV: &str = "DIGITALOCEAN_S3_SECRET_KEY";

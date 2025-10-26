@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, path::Path, str::FromStr, sync::Arc};
 
-use aws_sdk_s3::Client;
 use crate::types::{
     attachments::RawAttachment,
     env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET},
 };
+use aws_sdk_s3::Client;
 use mycorrhiza_common::{
     hash::Blake2bHash,
     s3_generic::{
@@ -90,7 +90,7 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
     info!(hashlist_length = %hashlist.len(),"Got all hashes from directory.");
 
     // Limit concurrency to 20
-    let semaphore = Arc::new(Semaphore::new(10));
+    let semaphore = Arc::new(Semaphore::new(30));
     let mut handles = Vec::with_capacity(hashlist.len());
 
     for hash in hashlist {

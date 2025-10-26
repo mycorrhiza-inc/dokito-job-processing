@@ -1,13 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
-use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
-use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::indexes::attachment_url_index::regenrate_url_attach_index;
 use rust_data_transforms::indexes::s3_storage_and_saving::generate_attachment_url_index;
-use tracing_subscriber;
-use sqlx::{query_as, FromRow};
+use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
+use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
+use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
 use serde_json;
+use sqlx::{FromRow, query_as};
+use tracing_subscriber;
 
 #[derive(FromRow)]
 struct DocketId {
@@ -15,7 +15,9 @@ struct DocketId {
 }
 
 async fn list_docket_ids_for_jurisdiction(fixed_jur: FixedJurisdiction) -> Result<Vec<String>> {
-    let pool = get_dokito_pool().await.map_err(|e| anyhow::anyhow!("Failed to get database pool: {}", e))?;
+    let pool = get_dokito_pool()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get database pool: {}", e))?;
     let pg_schema = fixed_jur.get_postgres_schema_name();
 
     let docket_ids = query_as::<_, DocketId>(&format!(
@@ -33,7 +35,10 @@ async fn generate_and_upload_attachment_index() -> Result<()> {
 
     // Generate the attachment index
     let attach_index = generate_attachment_url_index().await?;
-    tracing::info!("Generated attachment index with {} entries", attach_index.len());
+    tracing::info!(
+        "Generated attachment index with {} entries",
+        attach_index.len()
+    );
 
     // Upload to Redis and backup to S3 (this function handles both)
     regenrate_url_attach_index().await?;
@@ -82,15 +87,24 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::NukeAndReconfigureDatabase { fixed_jur } => {
-            tracing::info!("Starting nuke and reconfigure database operation for jurisdiction: {}", fixed_jur.get_postgres_schema_name());
+            tracing::info!(
+                "Starting nuke and reconfigure database operation for jurisdiction: {}",
+                fixed_jur.get_postgres_schema_name()
+            );
 
             recreate_schema(fixed_jur).await?;
 
             tracing::info!("Successfully completed nuke and reconfigure database operation");
-            println!("Database schema for {} has been successfully nuked and reconfigured", fixed_jur.get_postgres_schema_name());
+            eprintln!(
+                "Database schema for {} has been successfully nuked and reconfigured",
+                fixed_jur.get_postgres_schema_name()
+            );
         }
         Commands::ListDocketIds { fixed_jur } => {
-            tracing::info!("Listing docket IDs for jurisdiction: {}", fixed_jur.get_postgres_schema_name());
+            tracing::info!(
+                "Listing docket IDs for jurisdiction: {}",
+                fixed_jur.get_postgres_schema_name()
+            );
 
             let docket_ids = list_docket_ids_for_jurisdiction(fixed_jur).await?;
 
@@ -104,3 +118,4 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
