@@ -1,12 +1,13 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rust_data_transforms::indexes::attachment_url_index::regenrate_url_attach_index;
+use rust_data_transforms::indexes::attachment_url_index::{regenrate_url_attach_index, AttachIndex, upload_provided_attachment_index};
 use rust_data_transforms::indexes::s3_storage_and_saving::generate_attachment_url_index;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
 use serde_json;
 use sqlx::{FromRow, query_as};
+use std::io::{self, Read};
 use tracing_subscriber;
 
 #[derive(FromRow)]
@@ -52,6 +53,35 @@ async fn generate_and_upload_attachment_index() -> Result<()> {
     Ok(())
 }
 
+async fn read_attachment_index_from_stdin() -> Result<AttachIndex> {
+    tracing::info!("Reading attachment index from stdin");
+
+    let mut buffer = String::new();
+    io::stdin().read_to_string(&mut buffer)?;
+
+    if buffer.trim().is_empty() {
+        return Err(anyhow::anyhow!("No data provided via stdin"));
+    }
+
+    let attach_index: AttachIndex = serde_json::from_str(&buffer)?;
+    tracing::info!("Successfully parsed attachment index with {} entries", attach_index.len());
+
+    Ok(attach_index)
+}
+
+async fn upload_attachment_index_from_stdin() -> Result<()> {
+    tracing::info!("Starting attachment index upload from stdin");
+
+    // Read and parse the attachment index from stdin
+    let attach_index = read_attachment_index_from_stdin().await?;
+
+    // Upload to Redis and backup to S3 using the existing infrastructure
+    upload_provided_attachment_index(attach_index).await?;
+
+    tracing::info!("Successfully uploaded attachment index from stdin to Redis and S3");
+    Ok(())
+}
+
 #[derive(Parser)]
 #[command(name = "database-utils")]
 #[command(about = "Database utility commands for managing dokito database schemas")]
@@ -74,6 +104,8 @@ enum Commands {
     },
     /// Generate attachment URL index, upload to Redis, backup to S3, and print JSON to stdout
     GenerateAttachmentIndex,
+    /// Upload attachment index from JSON provided via stdin to Redis and S3
+    UploadAttachmentIndexFromStdin,
 }
 
 #[tokio::main]
@@ -113,6 +145,9 @@ async fn main() -> Result<()> {
         }
         Commands::GenerateAttachmentIndex => {
             generate_and_upload_attachment_index().await?;
+        }
+        Commands::UploadAttachmentIndexFromStdin => {
+            upload_attachment_index_from_stdin().await?;
         }
     }
 

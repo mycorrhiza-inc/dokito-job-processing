@@ -161,6 +161,19 @@ pub async fn regenrate_url_attach_index() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Upload a provided attachment index to Redis and S3 without regenerating it
+pub async fn upload_provided_attachment_index(attach_index: AttachIndex) -> anyhow::Result<()> {
+    // Store in Redis
+    store_full_index_in_redis(&attach_index).await?;
+
+    // Keep S3 as backup storage
+    let s3_client = DIGITALOCEAN_S3.make_s3_client().await;
+    let canon_object = CanonAttachIndex(attach_index);
+    let _res = upload_object(&s3_client, &(), &canon_object).await;
+
+    Ok(())
+}
+
 #[derive(Default, Clone, Copy)]
 pub struct RegenerateUrlAttachIndex {}
 #[async_trait]
