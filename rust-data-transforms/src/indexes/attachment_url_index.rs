@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use crate::types::{attachments::RawAttachment, env_vars::DIGITALOCEAN_S3};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use chrono::Duration;
 use mycorrhiza_common::{
     s3_generic::cannonical_location::upload_object,
     tasks::{ExecuteUserTask, display_error_as_json},
@@ -11,14 +12,12 @@ use redis::AsyncCommands;
 use serde_json;
 use sha2::{Digest, Sha256};
 
-use crate::indexes::s3_storage_and_saving::{
-    CanonAttachIndex, generate_attachment_url_index,
-};
+use crate::indexes::s3_storage_and_saving::{CanonAttachIndex, generate_attachment_url_index};
 
 pub type AttachIndex = BTreeMap<String, RawAttachment>;
 
-/// Cache TTL in seconds (6 hours for attachment index)
-const ATTACHMENT_CACHE_TTL: i64 = 21600;
+/// Cache TTL in seconds (4 days for attachment index)
+const ATTACHMENT_CACHE_TTL: i64 = Duration::days(4).num_seconds();
 
 /// Generate consistent cache key for attachment URLs
 fn attachment_cache_key(url: &str) -> String {
