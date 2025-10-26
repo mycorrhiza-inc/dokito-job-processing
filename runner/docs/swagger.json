@@ -1,8 +1,26 @@
 {
+    "schemes": [
+        "http",
+        "https"
+    ],
     "swagger": "2.0",
     "info": {
-        "contact": {}
+        "description": "API for managing data scraping, processing, and upload pipelines for government documents",
+        "title": "Dokito Job Processing API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://www.swagger.io/support",
+            "email": "support@swagger.io"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
+        "version": "1.0"
     },
+    "host": "localhost:8080",
+    "basePath": "/",
     "paths": {
         "/api/health": {
             "get": {
@@ -21,7 +39,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.HealthResponse"
+                            "$ref": "#/definitions/api.HealthResponse"
                         }
                     },
                     "405": {
@@ -31,6 +49,64 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pipeline/async": {
+            "post": {
+                "description": "Queue a pipeline task for background processing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipeline"
+                ],
+                "summary": "Execute async pipeline",
+                "parameters": [
+                    {
+                        "description": "Async pipeline request with government ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncPipelineRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncPipelineResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncPipelineResponse"
                         }
                     }
                 }
@@ -56,7 +132,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/main.FullPipelineRequest"
+                            "$ref": "#/definitions/api.FullPipelineRequest"
                         }
                     }
                 ],
@@ -64,7 +140,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.FullPipelineResponse"
+                            "$ref": "#/definitions/api.FullPipelineResponse"
                         }
                     },
                     "400": {
@@ -88,7 +164,27 @@
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/main.FullPipelineResponse"
+                            "$ref": "#/definitions/api.FullPipelineResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/queue/status": {
+            "get": {
+                "description": "Get the current status of the background task queues",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "queue"
+                ],
+                "summary": "Get queue status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.QueueStatusResponse"
                         }
                     }
                 }
@@ -96,15 +192,49 @@
         }
     },
     "definitions": {
-        "main.FullPipelineRequest": {
+        "api.AsyncPipelineRequest": {
             "type": "object",
             "properties": {
                 "gov_id": {
                     "type": "string"
+                },
+                "intermediate_source": {
+                    "$ref": "#/definitions/pipelines.IntermediateSource"
                 }
             }
         },
-        "main.FullPipelineResponse": {
+        "api.AsyncPipelineResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "gov_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "api.FullPipelineRequest": {
+            "type": "object",
+            "properties": {
+                "gov_id": {
+                    "type": "string"
+                },
+                "intermediate_source": {
+                    "$ref": "#/definitions/pipelines.IntermediateSource"
+                }
+            }
+        },
+        "api.FullPipelineResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -130,7 +260,7 @@
                 }
             }
         },
-        "main.HealthResponse": {
+        "api.HealthResponse": {
             "type": "object",
             "properties": {
                 "services": {
@@ -146,6 +276,42 @@
                     "type": "string"
                 }
             }
+        },
+        "api.QueueStatusResponse": {
+            "type": "object",
+            "properties": {
+                "queue_stats": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
+        },
+        "pipelines.IntermediateSource": {
+            "type": "string",
+            "enum": [
+                "none",
+                "html",
+                "raw_json",
+                "processed_json"
+            ],
+            "x-enum-comments": {
+                "IntermediateSourceHTML": "Retrieve from HTML snapshots in S3/local storage",
+                "IntermediateSourceNone": "No intermediate source, run full scraping",
+                "IntermediateSourceProcessedJSON": "Retrieve from processed JSON objects storage",
+                "IntermediateSourceRawJSON": "Retrieve from raw JSON objects storage"
+            },
+            "x-enum-descriptions": [
+                "No intermediate source, run full scraping",
+                "Retrieve from HTML snapshots in S3/local storage",
+                "Retrieve from raw JSON objects storage",
+                "Retrieve from processed JSON objects storage"
+            ],
+            "x-enum-varnames": [
+                "IntermediateSourceNone",
+                "IntermediateSourceHTML",
+                "IntermediateSourceRawJSON",
+                "IntermediateSourceProcessedJSON"
+            ]
         }
     }
 }
