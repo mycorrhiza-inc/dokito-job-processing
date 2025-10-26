@@ -15,7 +15,6 @@ func SetupRoutes() *http.ServeMux {
 	mux.HandleFunc("/api/health", HandleHealth)
 
 	// Pipeline endpoints
-	mux.HandleFunc("/api/pipeline/full", HandleFullPipeline)
 	mux.HandleFunc("/api/pipeline/async", HandleAsyncPipeline)
 	mux.HandleFunc("/api/pipeline/bulk-queue", HandleBulkQueue)
 

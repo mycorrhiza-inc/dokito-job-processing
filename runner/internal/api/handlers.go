@@ -21,23 +21,21 @@ type HealthResponse struct {
 	Services  map[string]string `json:"services"`
 }
 
-type FullPipelineRequest struct {
-	GovID              string                        `json:"gov_id"`
-	IntermediateSource pipelines.IntermediateSource `json:"intermediate_source,omitempty"`
-}
 
 type AsyncPipelineRequest struct {
-	GovID              string                        `json:"gov_id"`
+	GovIDs             []string                      `json:"gov_ids"`
 	IntermediateSource pipelines.IntermediateSource `json:"intermediate_source,omitempty"`
 	DebugMode          bool                          `json:"debug_mode,omitempty"`
 }
 
 type AsyncPipelineResponse struct {
-	Success   bool   `json:"success"`
-	RequestID string `json:"request_id"`
-	GovID     string `json:"gov_id"`
-	Message   string `json:"message"`
-	Error     string `json:"error,omitempty"`
+	Success    bool     `json:"success"`
+	RequestIDs []string `json:"request_ids"`
+	GovIDs     []string `json:"gov_ids"`
+	Queued     int      `json:"queued"`
+	Errors     []string `json:"errors,omitempty"`
+	Message    string   `json:"message"`
+	Error      string   `json:"error,omitempty"`
 }
 
 type QueueStatusResponse struct {
@@ -60,15 +58,6 @@ type BulkQueueResponse struct {
 	Error        string   `json:"error,omitempty"`
 }
 
-type FullPipelineResponse struct {
-	Success      bool   `json:"success"`
-	GovID        string `json:"gov_id"`
-	ScraperType  string `json:"scraper_type"`
-	ScrapeCount  int    `json:"scrape_count"`
-	ProcessCount int    `json:"process_count"`
-	Message      string `json:"message"`
-	Error        string `json:"error,omitempty"`
-}
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -141,82 +130,13 @@ func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// @Summary Execute full pipeline
-// @Description Execute the complete data pipeline for a given government ID including scraping, processing, and uploading
+
+// @Summary Execute async pipeline for multiple IDs
+// @Description Queue pipeline tasks for multiple government IDs for background processing
 // @Tags pipeline
 // @Accept json
 // @Produce json
-// @Param request body FullPipelineRequest true "Pipeline request with government ID"
-// @Success 200 {object} FullPipelineResponse
-// @Failure 400 {object} map[string]string
-// @Failure 405 {object} map[string]string
-// @Failure 500 {object} FullPipelineResponse
-// @Router /api/pipeline/full [post]
-func HandleFullPipeline(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
-		return
-	}
-	defer r.Body.Close()
-
-	var req FullPipelineRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
-		return
-	}
-
-	if req.GovID == "" {
-		writeError(w, http.StatusBadRequest, "gov_id is required")
-		return
-	}
-
-	govID := strings.TrimSpace(req.GovID)
-
-	// Execute the shared NY PUC pipeline
-	result, err := pipelines.ExecuteNYPUCBasicPipeline(govID)
-
-	response := FullPipelineResponse{
-		GovID: govID,
-	}
-
-	if err != nil {
-		response.Success = false
-		response.Error = err.Error()
-		if result != nil {
-			response.ScraperType = result.ScraperType
-			response.ScrapeCount = result.ScrapeCount
-			response.ProcessCount = result.ProcessCount
-		}
-		writeJSON(w, http.StatusInternalServerError, response)
-		return
-	}
-
-	// Set scraper type from successful result
-	response.ScraperType = result.ScraperType
-
-	// Success - populate response with pipeline results
-	response.Success = true
-	response.ScrapeCount = result.ScrapeCount
-	response.ProcessCount = result.ProcessCount
-	response.Message = fmt.Sprintf("Full pipeline completed successfully for %s. Scraped %d items, processed %d items.",
-		result.GovID, result.ScrapeCount, result.ProcessCount)
-
-	log.Printf("✅ Full pipeline completed for %s", govID)
-	writeJSON(w, http.StatusOK, response)
-}
-
-// @Summary Execute async pipeline
-// @Description Queue a pipeline task for background processing
-// @Tags pipeline
-// @Accept json
-// @Produce json
-// @Param request body AsyncPipelineRequest true "Async pipeline request with government ID"
+// @Param request body AsyncPipelineRequest true "Async pipeline request with list of government IDs"
 // @Success 202 {object} AsyncPipelineResponse
 // @Failure 400 {object} map[string]string
 // @Failure 405 {object} map[string]string
@@ -241,12 +161,10 @@ func HandleAsyncPipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.GovID == "" {
-		writeError(w, http.StatusBadRequest, "gov_id is required")
+	if len(req.GovIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "gov_ids array is required and cannot be empty")
 		return
 	}
-
-	govID := strings.TrimSpace(req.GovID)
 
 	// Create execution context (disable debug mode for API requests unless explicitly requested)
 	var config *core.ExecutionConfig
@@ -257,25 +175,53 @@ func HandleAsyncPipeline(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := core.WithExecutionConfig(context.Background(), config)
 
-	// Enqueue the pipeline task
-	requestID, err := worker.EnqueuePipelineTask(ctx, govID, req.IntermediateSource)
+	// Queue tasks for all government IDs
+	var requestIDs []string
+	var successfulGovIDs []string
+	var errors []string
 
-	response := AsyncPipelineResponse{
-		GovID: govID,
+	for _, govID := range req.GovIDs {
+		govID = strings.TrimSpace(govID)
+		if govID == "" {
+			errors = append(errors, "empty gov_id found in list")
+			continue
+		}
+
+		// Enqueue the pipeline task
+		requestID, err := worker.EnqueuePipelineTask(ctx, govID, req.IntermediateSource)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("Failed to queue %s: %v", govID, err))
+			continue
+		}
+
+		requestIDs = append(requestIDs, requestID)
+		successfulGovIDs = append(successfulGovIDs, govID)
+		log.Printf("📋 Pipeline task queued for %s (RequestID: %s)", govID, requestID)
 	}
 
-	if err != nil {
+	response := AsyncPipelineResponse{
+		RequestIDs: requestIDs,
+		GovIDs:     successfulGovIDs,
+		Queued:     len(successfulGovIDs),
+		Errors:     errors,
+	}
+
+	// Determine response status and message
+	if len(successfulGovIDs) == 0 {
 		response.Success = false
-		response.Error = err.Error()
+		response.Error = "Failed to queue any pipeline tasks"
 		writeJSON(w, http.StatusInternalServerError, response)
 		return
 	}
 
 	response.Success = true
-	response.RequestID = requestID
-	response.Message = fmt.Sprintf("Pipeline task queued for %s. Use request_id %s to check status.", govID, requestID)
+	if len(errors) > 0 {
+		response.Message = fmt.Sprintf("Queued %d of %d pipeline tasks. %d failed.", len(successfulGovIDs), len(req.GovIDs), len(errors))
+	} else {
+		response.Message = fmt.Sprintf("Successfully queued %d pipeline tasks.", len(successfulGovIDs))
+	}
 
-	log.Printf("📋 Pipeline task queued for %s (RequestID: %s)", govID, requestID)
+	log.Printf("📋 Queued %d pipeline tasks, %d errors", len(successfulGovIDs), len(errors))
 	writeJSON(w, http.StatusAccepted, response)
 }
 

@@ -58,7 +58,7 @@ const docTemplate = `{
         },
         "/api/pipeline/async": {
             "post": {
-                "description": "Queue a pipeline task for background processing",
+                "description": "Queue pipeline tasks for multiple government IDs for background processing",
                 "consumes": [
                     "application/json"
                 ],
@@ -68,10 +68,10 @@ const docTemplate = `{
                 "tags": [
                     "pipeline"
                 ],
-                "summary": "Execute async pipeline",
+                "summary": "Execute async pipeline for multiple IDs",
                 "parameters": [
                     {
-                        "description": "Async pipeline request with government ID",
+                        "description": "Async pipeline request with list of government IDs",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -172,64 +172,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/pipeline/full": {
-            "post": {
-                "description": "Execute the complete data pipeline for a given government ID including scraping, processing, and uploading",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "pipeline"
-                ],
-                "summary": "Execute full pipeline",
-                "parameters": [
-                    {
-                        "description": "Pipeline request with government ID",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/api.FullPipelineRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/api.FullPipelineResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method Not Allowed",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/api.FullPipelineResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/queue/status": {
             "get": {
                 "description": "Get the current status of the background task queues",
@@ -258,8 +200,11 @@ const docTemplate = `{
                 "debug_mode": {
                     "type": "boolean"
                 },
-                "gov_id": {
-                    "type": "string"
+                "gov_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "intermediate_source": {
                     "$ref": "#/definitions/pipelines.IntermediateSource"
@@ -272,14 +217,29 @@ const docTemplate = `{
                 "error": {
                     "type": "string"
                 },
-                "gov_id": {
-                    "type": "string"
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "gov_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "message": {
                     "type": "string"
                 },
-                "request_id": {
-                    "type": "string"
+                "queued": {
+                    "type": "integer"
+                },
+                "request_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "success": {
                     "type": "boolean"
@@ -329,43 +289,6 @@ const docTemplate = `{
                 },
                 "total_missing": {
                     "type": "integer"
-                }
-            }
-        },
-        "api.FullPipelineRequest": {
-            "type": "object",
-            "properties": {
-                "gov_id": {
-                    "type": "string"
-                },
-                "intermediate_source": {
-                    "$ref": "#/definitions/pipelines.IntermediateSource"
-                }
-            }
-        },
-        "api.FullPipelineResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "gov_id": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "process_count": {
-                    "type": "integer"
-                },
-                "scrape_count": {
-                    "type": "integer"
-                },
-                "scraper_type": {
-                    "type": "string"
-                },
-                "success": {
-                    "type": "boolean"
                 }
             }
         },
