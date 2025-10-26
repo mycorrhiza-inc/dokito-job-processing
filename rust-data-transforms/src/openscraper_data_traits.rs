@@ -13,6 +13,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::data_processing_traits::{ProcessFrom, Revalidate, RevalidationOutcome};
+use crate::indexes::attachment_url_index::lookup_hash_from_url;
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::llm_prompts::{
     clean_up_organization_name_list, split_and_fix_organization_names_blob,
@@ -29,7 +30,6 @@ use crate::types::processed::{
     ProcessedGenericAttachment, ProcessedGenericDocket, ProcessedGenericFiling,
 };
 use crate::types::raw::{RawGenericAttachment, RawGenericDocket, RawGenericFiling};
-use crate::indexes::attachment_url_index::lookup_hash_from_url;
 
 impl Revalidate for ProcessedGenericDocket {
     async fn revalidate(&mut self) -> RevalidationOutcome {
@@ -314,7 +314,7 @@ fn processed_human_from_blob_name(name: &str) -> Option<ProcessedGenericHuman> {
     // Split by whitespace
     let mut parts = trimmed.split_whitespace();
     let first = parts.next().unwrap_or("");
-    let last = parts.next().unwrap_or("");
+    let last = parts.last().unwrap_or("");
 
     // If there is only one part, treat both as empty
     let (first_name, last_name) = if last.is_empty() {
@@ -477,8 +477,7 @@ impl ProcessFrom<RawGenericAttachment> for ProcessedGenericAttachment {
             .unwrap_or_else(Uuid::new_v4);
 
         // Try to get hash from: 1) input, 2) cached, 3) URL cache
-        let hash = (input.hash)
-            .or_else(|| cached.and_then(|v| v.hash));
+        let hash = (input.hash).or_else(|| cached.and_then(|v| v.hash));
 
         let hash = if hash.is_none() && !input.url.is_empty() {
             // Check URL cache for existing hash
