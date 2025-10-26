@@ -112,12 +112,13 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
 
     // Upsert docket
     let docket_uuid: Uuid = query_scalar(
-        &format!("INSERT INTO {pg_schema}.dockets (uuid, docket_govid, docket_description, docket_title, industry, hearing_officer, opened_date, closed_date, petitioner_strings, docket_type, docket_subtype )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        &format!("INSERT INTO {pg_schema}.dockets (uuid, docket_govid, docket_description, docket_title, docket_url, industry, hearing_officer, opened_date, closed_date, petitioner_strings, docket_type, docket_subtype )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          ON CONFLICT (uuid) DO UPDATE SET
          docket_govid = EXCLUDED.docket_govid,
          docket_description = EXCLUDED.docket_description,
          docket_title = EXCLUDED.docket_title,
+         docket_url = EXCLUDED.docket_url,
          industry = EXCLUDED.industry,
          hearing_officer = EXCLUDED.hearing_officer,
          opened_date = EXCLUDED.opened_date,
@@ -131,6 +132,7 @@ pub async fn ingest_sql_fixed_jurisdiction_case(
     .bind(case.case_govid.as_str())
     .bind(&case.description)
     .bind(&case.case_name)
+    .bind(&case.case_url)
     .bind(&case.industry)
     .bind(&case.hearing_officer)
     .bind(case.opened_date)

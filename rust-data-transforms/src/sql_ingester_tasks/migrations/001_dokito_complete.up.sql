@@ -37,6 +37,7 @@ CREATE TABLE public.dockets (
   docket_subtype text NOT NULL DEFAULT ''::text,
   docket_description text NOT NULL DEFAULT ''::text,
   docket_title text NOT NULL DEFAULT ''::text,
+  docket_url text NOT NULL DEFAULT ''::text,
   industry text NOT NULL DEFAULT ''::text,
   hearing_officer text NOT NULL DEFAULT ''::text,
   opened_date date NOT NULL,
