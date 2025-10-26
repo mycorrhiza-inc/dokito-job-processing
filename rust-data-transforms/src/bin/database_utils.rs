@@ -7,6 +7,7 @@ use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_
 use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
 use serde_json;
 use sqlx::{FromRow, query_as};
+use uuid::Uuid;
 use std::io::{self, Read};
 use tracing_subscriber;
 use futures::stream::{self, StreamExt};
@@ -18,7 +19,7 @@ struct DocketId {
 
 #[derive(FromRow)]
 struct AttachmentRecord {
-    uuid: String,
+    uuid: Uuid,
     attachment_url: String,
 }
 
