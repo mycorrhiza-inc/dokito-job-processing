@@ -20,6 +20,7 @@ func SetupRoutes() *http.ServeMux {
 
 	// Queue management endpoints
 	mux.HandleFunc("/api/queue/status", HandleQueueStatus)
+	mux.HandleFunc("/api/queue/clear", HandleQueueClear)
 
 	// Swagger documentation
 	mux.Handle("/swagger/", httpSwagger.Handler(

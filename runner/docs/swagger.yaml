@@ -75,6 +75,15 @@ definitions:
       timestamp:
         type: string
     type: object
+  api.QueueClearResponse:
+    properties:
+      error:
+        type: string
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
   api.QueueStatusResponse:
     properties:
       queue_stats:
@@ -216,6 +225,29 @@ paths:
       summary: Bulk queue missing govids
       tags:
       - pipeline
+  /api/queue/clear:
+    delete:
+      description: Remove all pending, scheduled, and retry tasks from the queue
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.QueueClearResponse'
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.QueueClearResponse'
+      summary: Clear queue
+      tags:
+      - queue
   /api/queue/status:
     get:
       description: Get the current status of the background task queues

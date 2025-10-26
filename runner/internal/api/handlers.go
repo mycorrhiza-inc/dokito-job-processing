@@ -42,6 +42,12 @@ type QueueStatusResponse struct {
 	QueueStats map[string]interface{} `json:"queue_stats"`
 }
 
+type QueueClearResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Error   string `json:"error,omitempty"`
+}
+
 type BulkQueueRequest struct {
 	Limit              int                           `json:"limit,omitempty"`
 	IntermediateSource pipelines.IntermediateSource `json:"intermediate_source,omitempty"`
@@ -242,6 +248,38 @@ func HandleQueueStatus(w http.ResponseWriter, r *http.Request) {
 		QueueStats: stats,
 	}
 
+	writeJSON(w, http.StatusOK, response)
+}
+
+// @Summary Clear queue
+// @Description Remove all pending, scheduled, and retry tasks from the queue
+// @Tags queue
+// @Produce json
+// @Success 200 {object} QueueClearResponse
+// @Failure 405 {object} map[string]string
+// @Failure 500 {object} QueueClearResponse
+// @Router /api/queue/clear [delete]
+func HandleQueueClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	err := worker.ClearQueue()
+
+	response := QueueClearResponse{}
+
+	if err != nil {
+		response.Success = false
+		response.Error = err.Error()
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	response.Success = true
+	response.Message = "Queue cleared successfully. All pending, scheduled, and retry tasks have been removed."
+
+	log.Printf("🗑️  Queue cleared via API")
 	writeJSON(w, http.StatusOK, response)
 }
 

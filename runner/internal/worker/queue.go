@@ -145,3 +145,48 @@ func GetQueueStats() map[string]interface{} {
 		"library":     "asynq",
 	}
 }
+
+// ClearQueue removes all pending and scheduled tasks from the queue
+func ClearQueue() error {
+	if Client == nil {
+		return ErrQueueNotInitialized
+	}
+
+	// Get Redis connection options to create an inspector
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		redisURL = "redis://127.0.0.1:6379"
+	}
+
+	redisOpt, err := asynq.ParseRedisURI(redisURL)
+	if err != nil {
+		return err
+	}
+
+	// Create an inspector to manage the queue
+	inspector := asynq.NewInspector(redisOpt)
+	defer inspector.Close()
+
+	// Delete all pending tasks in the default queue
+	deleted, err := inspector.DeleteAllPendingTasks("default")
+	if err != nil {
+		return err
+	}
+
+	// Delete all scheduled tasks in the default queue
+	scheduledDeleted, err := inspector.DeleteAllScheduledTasks("default")
+	if err != nil {
+		return err
+	}
+
+	// Delete all retry tasks in the default queue
+	retryDeleted, err := inspector.DeleteAllRetryTasks("default")
+	if err != nil {
+		return err
+	}
+
+	log.Printf("🗑️  Queue cleared: %d pending, %d scheduled, %d retry tasks deleted",
+		deleted, scheduledDeleted, retryDeleted)
+
+	return nil
+}

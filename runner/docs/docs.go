@@ -172,6 +172,41 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/queue/clear": {
+            "delete": {
+                "description": "Remove all pending, scheduled, and retry tasks from the queue",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "queue"
+                ],
+                "summary": "Clear queue",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.QueueClearResponse"
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.QueueClearResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/queue/status": {
             "get": {
                 "description": "Get the current status of the background task queues",
@@ -306,6 +341,20 @@ const docTemplate = `{
                 },
                 "timestamp": {
                     "type": "string"
+                }
+            }
+        },
+        "api.QueueClearResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
                 }
             }
         },
