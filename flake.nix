@@ -34,6 +34,65 @@
             inherit pkgs system gomod2nix;
           };
 
+          # Environment variable definitions
+          secretEnvVars = [
+            "DATABASE_URL"
+            "DIGITALOCEAN_S3_ACCESS_KEY"
+            "DIGITALOCEAN_S3_SECRET_KEY"
+            "DEEPINFRA_API_KEY"
+          ];
+
+          publicEnvVars = {
+            DIGITALOCEAN_S3_ENDPOINT = "https://sfo3.digitaloceanspaces.com";
+            DIGITALOCEAN_S3_REGION = "sfo3";
+            DOKITO_S3_HTML_BUCKET = "flaoq";
+            OPENSCRAPERS_S3_OBJECT_BUCKET = "openscrapers";
+            DOKITO_INGEST_REDIS = "http://localhost:6379";
+          };
+
+          # Environment validation function
+          envValidation = ''
+            echo "🔍 Validating environment configuration..."
+
+            # Check secret environment variables
+            missing_secrets=()
+            ${builtins.concatStringsSep "\n" (map (var: ''
+              if [ -z "''${${var}:-}" ]; then
+                missing_secrets+=("${var}")
+              fi
+            '') secretEnvVars)}
+
+            if [ ''${#missing_secrets[@]} -gt 0 ]; then
+              echo "❌ Missing required secret environment variables:"
+              for var in "''${missing_secrets[@]}"; do
+                echo "   - $var"
+              done
+              echo ""
+              echo "💡 Please copy example.env to .env and set the required values:"
+              echo "   cp example.env .env"
+              echo "   # Edit .env with your actual values"
+              echo "   source .env"
+              echo ""
+              exit 1
+            fi
+
+            # Set defaults for public variables and log when using defaults
+            echo "📝 Public environment variables:"
+            ${builtins.concatStringsSep "\n" (builtins.attrNames publicEnvVars |> map (var: let
+              defaultValue = publicEnvVars.${var};
+            in ''
+              if [ -z "''${${var}:-}" ]; then
+                export ${var}="${defaultValue}"
+                echo "   ${var}: Using default (${defaultValue})"
+              else
+                echo "   ${var}: Using custom value (''${${var}})"
+              fi
+            ''))}
+
+            echo "✅ All secret environment variables are set"
+            echo ""
+          '';
+
           # Common environment variable setup function
           dokitoEnvSetup = ''
             # Set scraper binary paths (these point to the app programs)
@@ -55,6 +114,7 @@
 
           # Debug function that reads and displays the actual environment variables
           dokitoEnvDebug = ''
+            ${envValidation}
             echo "🔧 Environment configured:"
             echo "  NYPUC: $OPENSCRAPER_PATH_NYPUC"
             echo "  COPUC: $OPENSCRAPER_PATH_COPUC"
@@ -82,22 +142,15 @@
 
             # Check database connectivity
             echo "🔍 Checking database connectivity..."
-            if [ -n "''${DATABASE_URL:-}" ]; then
-              echo "  Database URL: Set (checking connection...)"
-              if ! ${pkgs.postgresql}/bin/psql "''${DATABASE_URL}" -c "SELECT 1;" >/dev/null 2>&1; then
-                echo "❌ Database connection failed!"
-                echo "   URL pattern: $(echo "''${DATABASE_URL}" | sed 's/:\/\/.*@/:\/\/<REDACTED>@/')"
-                echo "   This will cause processing and upload steps to fail."
-                echo "   Please check your database credentials and connectivity."
-                exit 1
-              else
-                echo "✅ Database connection successful"
-              fi
-            else
-              echo "⚠️  No DATABASE_URL environment variable set"
-              echo "   Processing and upload steps will fail without database access."
-              echo "   Set DATABASE_URL to continue."
+            echo "  Database URL: Set (checking connection...)"
+            if ! ${pkgs.postgresql}/bin/psql "''${DATABASE_URL}" -c "SELECT 1;" >/dev/null 2>&1; then
+              echo "❌ Database connection failed!"
+              echo "   URL pattern: $(echo "''${DATABASE_URL}" | sed 's/:\/\/.*@/:\/\/<REDACTED>@/')"
+              echo "   This will cause processing and upload steps to fail."
+              echo "   Please check your database credentials and connectivity."
               exit 1
+            else
+              echo "✅ Database connection successful"
             fi
             echo ""
           '';
