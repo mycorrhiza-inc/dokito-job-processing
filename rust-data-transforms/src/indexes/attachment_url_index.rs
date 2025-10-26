@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::collections::BTreeMap;
 
 use crate::types::{attachments::RawAttachment, env_vars::DIGITALOCEAN_S3};
 use anyhow::{Context, Result};
@@ -13,19 +10,12 @@ use mycorrhiza_common::{
 use redis::AsyncCommands;
 use serde_json;
 use sha2::{Digest, Sha256};
-use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::indexes::s3_storage_and_saving::{
-    CanonAttachIndex, generate_attachment_url_index, pull_index_from_s3,
+    CanonAttachIndex, generate_attachment_url_index,
 };
 
 pub type AttachIndex = BTreeMap<String, RawAttachment>;
-
-// Keep S3 fallback for when Redis is unavailable
-static GLOBAL_RAW_ATTACHMENT_URL_INDEX_CACHE: RwLock<AttachIndex> =
-    RwLock::const_new(BTreeMap::new());
-
-static HAS_PULLED_FROM_CACHE_ONCE: AtomicBool = AtomicBool::new(false);
 
 /// Cache TTL in seconds (6 hours for attachment index)
 const ATTACHMENT_CACHE_TTL: i64 = 21600;
@@ -158,34 +148,17 @@ async fn store_full_index_in_redis(index: &AttachIndex) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_global_att_index() -> RwLockReadGuard<'static, AttachIndex> {
-    if !HAS_PULLED_FROM_CACHE_ONCE.load(Ordering::Relaxed) {
-        let new_index = pull_index_from_s3().await;
-        let mut guard = GLOBAL_RAW_ATTACHMENT_URL_INDEX_CACHE.write().await;
-        *guard = new_index;
-        HAS_PULLED_FROM_CACHE_ONCE.store(true, Ordering::Relaxed);
-    }
-
-    GLOBAL_RAW_ATTACHMENT_URL_INDEX_CACHE.read().await
-}
 pub async fn regenrate_url_attach_index() -> anyhow::Result<()> {
     let attach_index = generate_attachment_url_index().await?;
 
-    // Store in Redis first
-    if let Err(e) = store_full_index_in_redis(&attach_index).await {
-        tracing::warn!("Failed to store attachment index in Redis: {}", e);
-    }
+    // Store in Redis
+    store_full_index_in_redis(&attach_index).await?;
 
     // Keep S3 as backup storage
     let s3_client = DIGITALOCEAN_S3.make_s3_client().await;
     let canon_object = CanonAttachIndex(attach_index);
     let _res = upload_object(&s3_client, &(), &canon_object).await;
-    let attach_index = canon_object.0;
 
-    // Update local cache as fallback
-    let mut guard = GLOBAL_RAW_ATTACHMENT_URL_INDEX_CACHE.write().await;
-    *guard = attach_index;
-    drop(guard);
     Ok(())
 }
 
