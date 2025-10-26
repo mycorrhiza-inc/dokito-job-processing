@@ -85,6 +85,9 @@ schema = 3
   [mod."github.com/hibiken/asynq"]
     version = "v0.24.1"
     hash = "sha256-pXvt5UuHyBLJlht2mtxNkuVk6QSIsPEgsvMby10QBE8="
+  [mod."github.com/inconshreveable/mousetrap"]
+    version = "v1.1.0"
+    hash = "sha256-XWlYH0c8IcxAwQTnIi6WYqq44nOKUylSWxWO/vi+8pE="
   [mod."github.com/josharian/intern"]
     version = "v1.0.0"
     hash = "sha256-LJR0QE2vOQ2/2shBbO5Yl8cVPq+NFrE3ers0vu9FRP0="
@@ -100,6 +103,12 @@ schema = 3
   [mod."github.com/spf13/cast"]
     version = "v1.3.1"
     hash = "sha256-wT6IRl4ZFvzeyLlv7l/GJt39shnRRYHzxyDTh9AhaFE="
+  [mod."github.com/spf13/cobra"]
+    version = "v1.10.1"
+    hash = "sha256-OP6wdqk4dvBD8U5aicTkySHZ2s0LWnBo2TST2SmgcpM="
+  [mod."github.com/spf13/pflag"]
+    version = "v1.0.9"
+    hash = "sha256-YAjyYpq5BXCosVJtvYLWFG1t4gma2ylzc7ILLoj/hD8="
   [mod."github.com/swaggo/files"]
     version = "v0.0.0-20220610200504-28940afbdbfe"
     hash = "sha256-F0ENuTWTsobo4/oIrcKXLmWHabA1wq66ReTHebJT6eY="
