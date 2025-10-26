@@ -3,16 +3,16 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use async_trait::async_trait;
-use anyhow::{Context, Result};
-use redis::AsyncCommands;
-use sha2::{Digest, Sha256};
-use serde_json;
 use crate::types::{attachments::RawAttachment, env_vars::DIGITALOCEAN_S3};
+use anyhow::{Context, Result};
+use async_trait::async_trait;
 use mycorrhiza_common::{
     s3_generic::cannonical_location::upload_object,
     tasks::{ExecuteUserTask, display_error_as_json},
 };
+use redis::AsyncCommands;
+use serde_json;
+use sha2::{Digest, Sha256};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::indexes::s3_storage_and_saving::{
@@ -40,8 +40,8 @@ fn attachment_cache_key(url: &str) -> String {
 
 /// Get Redis connection using the existing infrastructure
 async fn get_redis_connection() -> Option<redis::aio::MultiplexedConnection> {
-    use std::env;
     use redis::Client;
+    use std::env;
     use std::sync::OnceLock;
     use tokio::sync::Mutex;
 
@@ -52,7 +52,8 @@ async fn get_redis_connection() -> Option<redis::aio::MultiplexedConnection> {
 
     // Initialize client if not already done
     if client_guard.is_none() {
-        let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_url =
+            env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
         match Client::open(redis_url.as_str()) {
             Ok(client) => {
                 // Test the connection
@@ -81,18 +82,20 @@ async fn get_cached_attachment(url: &str) -> Option<RawAttachment> {
     let key = attachment_cache_key(url);
 
     match conn.get::<_, String>(&key).await {
-        Ok(cached_data) => {
-            match serde_json::from_str::<RawAttachment>(&cached_data) {
-                Ok(attachment) => {
-                    tracing::debug!("Cache hit for attachment URL: {}", url);
-                    Some(attachment)
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to deserialize cached attachment for URL {}: {}", url, e);
-                    None
-                }
+        Ok(cached_data) => match serde_json::from_str::<RawAttachment>(&cached_data) {
+            Ok(attachment) => {
+                tracing::debug!("Cache hit for attachment URL: {}", url);
+                Some(attachment)
             }
-        }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to deserialize cached attachment for URL {}: {}",
+                    url,
+                    e
+                );
+                None
+            }
+        },
         Err(_) => {
             tracing::debug!("Cache miss for attachment URL: {}", url);
             None
@@ -111,7 +114,9 @@ async fn cache_attachment(url: &str, attachment: &RawAttachment) -> Result<()> {
     let serialized = serde_json::to_string(attachment)
         .context("Failed to serialize attachment for Redis cache")?;
 
-    let _: () = conn.set_ex(&key, &serialized, ATTACHMENT_CACHE_TTL as u64).await
+    let _: () = conn
+        .set_ex(&key, &serialized, ATTACHMENT_CACHE_TTL as u64)
+        .await
         .context("Failed to cache attachment data")?;
 
     tracing::debug!("Cached attachment for URL: {}", url);
@@ -140,7 +145,13 @@ async fn store_full_index_in_redis(index: &AttachIndex) -> Result<()> {
         "last_updated": chrono::Utc::now().to_rfc3339(),
         "total_count": index.len()
     });
-    let _: () = conn.set_ex(&metadata_key, metadata.to_string(), ATTACHMENT_CACHE_TTL as u64).await
+    let _: () = conn
+        .set_ex(
+            &metadata_key,
+            metadata.to_string(),
+            ATTACHMENT_CACHE_TTL as u64,
+        )
+        .await
         .context("Failed to store index metadata")?;
 
     tracing::info!("Successfully stored attachment index in Redis");
@@ -206,17 +217,5 @@ pub async fn lookup_hash_from_url(url: &str) -> Option<RawAttachment> {
         return Some(cached_attachment);
     }
 
-    // Fallback to local/S3 index
-    let index_guard = get_global_att_index().await;
-    let result = index_guard.get(url).cloned();
-
-    // If found in fallback, cache it in Redis for future use
-    if let Some(ref attachment) = result {
-        if let Err(e) = cache_attachment(url, attachment).await {
-            tracing::warn!("Failed to cache attachment from fallback lookup: {}", e);
-        }
-    }
-
-    result
+    None
 }
-
