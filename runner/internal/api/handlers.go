@@ -42,6 +42,22 @@ type QueueStatusResponse struct {
 	QueueStats map[string]interface{} `json:"queue_stats"`
 }
 
+type BulkQueueRequest struct {
+	Limit              int                           `json:"limit,omitempty"`
+	IntermediateSource pipelines.IntermediateSource `json:"intermediate_source,omitempty"`
+	DebugMode          bool                          `json:"debug_mode,omitempty"`
+}
+
+type BulkQueueResponse struct {
+	Success      bool     `json:"success"`
+	TotalMissing int      `json:"total_missing"`
+	Queued       int      `json:"queued"`
+	QueuedGovIds []string `json:"queued_gov_ids,omitempty"`
+	Errors       []string `json:"errors,omitempty"`
+	Message      string   `json:"message"`
+	Error        string   `json:"error,omitempty"`
+}
+
 type FullPipelineResponse struct {
 	Success      bool   `json:"success"`
 	GovID        string `json:"gov_id"`
@@ -230,8 +246,8 @@ func HandleAsyncPipeline(w http.ResponseWriter, r *http.Request) {
 
 	govID := strings.TrimSpace(req.GovID)
 
-	// Enqueue the pipeline task
-	requestID, err := worker.EnqueuePipelineTask(govID, req.IntermediateSource)
+	// Enqueue the pipeline task (disable debug mode for API requests)
+	requestID, err := worker.EnqueuePipelineTask(govID, req.IntermediateSource, false)
 
 	response := AsyncPipelineResponse{
 		GovID: govID,
@@ -269,6 +285,74 @@ func HandleQueueStatus(w http.ResponseWriter, r *http.Request) {
 		QueueStats: stats,
 	}
 
+	writeJSON(w, http.StatusOK, response)
+}
+
+// @Summary Bulk queue missing govids
+// @Description Find missing govids, randomize them, and queue a limited number for background processing
+// @Tags pipeline
+// @Accept json
+// @Produce json
+// @Param request body BulkQueueRequest true "Bulk queue request with optional limit and intermediate source"
+// @Success 200 {object} BulkQueueResponse
+// @Failure 400 {object} map[string]string
+// @Failure 405 {object} map[string]string
+// @Failure 500 {object} BulkQueueResponse
+// @Router /api/pipeline/bulk-queue [post]
+func HandleBulkQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	var req BulkQueueRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	// Default limit to 1000 if not specified
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 1000
+	}
+
+	log.Printf("📋 [Bulk Queue API] Starting bulk queue operation (limit: %d, source: %s)",
+		limit, req.IntermediateSource)
+
+	// Execute the bulk queue operation
+	result, err := worker.BulkQueueMissingGovIds(limit, req.IntermediateSource, req.DebugMode)
+
+	response := BulkQueueResponse{}
+
+	if err != nil {
+		response.Success = false
+		response.Error = err.Error()
+		log.Printf("❌ [Bulk Queue API] Operation failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	// Map the worker result to API response
+	response.Success = true
+	response.TotalMissing = result.TotalMissing
+	response.Queued = result.Queued
+	response.Errors = result.Errors
+	response.Message = result.Message
+
+	// Only include govid list if it's a reasonable size (to avoid huge responses)
+	if len(result.QueuedGovIds) <= 100 {
+		response.QueuedGovIds = result.QueuedGovIds
+	}
+
+	log.Printf("✅ [Bulk Queue API] Operation completed: %d queued", result.Queued)
 	writeJSON(w, http.StatusOK, response)
 }
 

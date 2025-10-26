@@ -8,6 +8,8 @@ import (
 	"os"
 	"runner/internal/core"
 	"runner/internal/pipelines"
+	"runner/internal/worker"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +32,8 @@ func RunCLI() {
 		RunUploadOnly()
 	case "missing-govids":
 		RunMissingGovIds()
+	case "bulk-queue":
+		RunBulkQueue()
 	case "env":
 		ShowEnvironment()
 	case "help", "-h", "--help":
@@ -50,6 +54,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli process <json_file>                                 - Run processing only on JSON file")
 	fmt.Println("  dokito-cli upload <json_file>                                  - Run upload only on JSON file")
 	fmt.Println("  dokito-cli missing-govids                                      - Get NY PUC govids not currently in database")
+	fmt.Println("  dokito-cli bulk-queue [--limit=N] [--source=<source>] [--no-debug] - Queue random missing govids for processing (debug on by default)")
 	fmt.Println("  dokito-cli env                                                 - Show environment configuration")
 	fmt.Println("")
 	fmt.Println("Intermediate Source Options:")
@@ -66,6 +71,8 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli pipeline --intermediate-source=processed_json 00-F-0229")
 	fmt.Println("  dokito-cli scrape 00-F-0229")
 	fmt.Println("  dokito-cli missing-govids")
+	fmt.Println("  dokito-cli bulk-queue --limit=500 --source=html")
+	fmt.Println("  dokito-cli bulk-queue --limit=30 --source=html --no-debug")
 	fmt.Println("  dokito-cli env")
 }
 
@@ -331,6 +338,72 @@ func ShowEnvironment() {
 	fmt.Printf("  DOKITO_UPLOAD_DOCKETS_BINARY_PATH: %s\n", os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH"))
 	fmt.Printf("  DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH: %s\n", os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"))
 	fmt.Printf("  DOKITO_DATABASE_UTILS_BINARY_PATH: %s\n", os.Getenv("DOKITO_DATABASE_UTILS_BINARY_PATH"))
+}
+
+func RunBulkQueue() {
+	limit := 1000                                              // Default limit
+	intermediateSource := pipelines.IntermediateSourceNone    // Default source
+	debugMode := true                                          // Default debug mode on for CLI
+
+	// Parse command line arguments
+	for i := 2; i < len(os.Args); i++ {
+		arg := os.Args[i]
+
+		if strings.HasPrefix(arg, "--limit=") {
+			limitStr := strings.TrimPrefix(arg, "--limit=")
+			if l, err := strconv.Atoi(limitStr); err == nil {
+				limit = l
+			} else {
+				fmt.Printf("❌ Invalid limit value: %s\n", limitStr)
+				os.Exit(1)
+			}
+		} else if strings.HasPrefix(arg, "--source=") {
+			sourceStr := strings.TrimPrefix(arg, "--source=")
+			source, err := parseIntermediateSource(sourceStr)
+			if err != nil {
+				fmt.Printf("❌ Invalid source: %v\n", err)
+				os.Exit(1)
+			}
+			intermediateSource = source
+		} else if arg == "--debug" {
+			debugMode = true
+		} else if arg == "--no-debug" {
+			debugMode = false
+		} else {
+			fmt.Printf("❌ Unknown argument: %s\n", arg)
+			PrintUsage()
+			os.Exit(1)
+		}
+	}
+
+	log.Printf("🚀 Starting bulk queue operation (limit: %d, source: %s, debug: %t)", limit, intermediateSource, debugMode)
+
+	// Initialize queues first
+	if err := worker.InitializeQueues(); err != nil {
+		log.Printf("❌ Failed to initialize task queues: %v", err)
+		os.Exit(1)
+	}
+
+	// Register tasks
+	worker.RegisterTasks()
+
+	// Execute bulk queue operation
+	result, err := worker.BulkQueueMissingGovIds(limit, intermediateSource, debugMode)
+	if err != nil {
+		log.Printf("❌ Bulk queue operation failed: %v", err)
+		os.Exit(1)
+	}
+
+	log.Printf("✅ Bulk queue operation completed")
+
+	// Print results as JSON
+	output, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		log.Printf("❌ Failed to marshal results: %v", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(string(output))
 }
 
 func getStatus(path string) string {

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
+	"runner/internal/core"
 	"runner/internal/pipelines"
 	"time"
 
-	"github.com/vmihailenco/taskq/v3"
+	"github.com/hibiken/asynq"
 )
 
 // PipelineTaskRequest represents the parameters for a pipeline task
@@ -17,6 +19,7 @@ type PipelineTaskRequest struct {
 	IntermediateSource pipelines.IntermediateSource  `json:"intermediate_source,omitempty"`
 	RequestID          string                         `json:"request_id,omitempty"`
 	Timestamp          time.Time                      `json:"timestamp"`
+	DebugMode          bool                          `json:"debug_mode,omitempty"`
 }
 
 // PipelineTaskResult represents the result of a pipeline task
@@ -33,34 +36,37 @@ type PipelineTaskResult struct {
 	CompletedAt  time.Time                       `json:"completed_at"`
 }
 
-var (
-	// PipelineTask is the registered task for processing pipelines
-	PipelineTask *taskq.Task
+const (
+	// TypePipelineTask is the task type for processing pipelines
+	TypePipelineTask = "process_pipeline"
 )
 
 // RegisterTasks registers all task handlers with the queue system
 func RegisterTasks() {
-	PipelineTask = taskq.RegisterTask(&taskq.TaskOptions{
-		Name:       "process_pipeline",
-		Handler:    processPipelineHandler,
-		RetryLimit: 3,
-		MinBackoff: 30 * time.Second,
-		MaxBackoff: 5 * time.Minute,
-	})
+	// Register the pipeline processing handler
+	ServeMux.HandleFunc(TypePipelineTask, processPipelineHandler)
 
-	log.Printf("📝 Registered pipeline processing task")
+	log.Printf("📝 Registered pipeline processing task with asynq")
 }
 
 // processPipelineHandler is the actual handler function that processes pipeline tasks
-func processPipelineHandler(ctx context.Context, req PipelineTaskRequest) error {
+func processPipelineHandler(ctx context.Context, t *asynq.Task) error {
+	// Parse the task payload
+	var req PipelineTaskRequest
+	if err := json.Unmarshal(t.Payload(), &req); err != nil {
+		return fmt.Errorf("failed to unmarshal task payload: %w", err)
+	}
+
 	startTime := time.Now()
 
 	log.Printf("🔄 [Worker] Starting pipeline processing for GovID: %s (RequestID: %s)",
 		req.GovID, req.RequestID)
 
 	// Prepare pipeline configuration
+	// Use debug mode from request, but fall back to global debug mode if not specified
+	debugMode := req.DebugMode || GlobalDebugMode
 	config := pipelines.NYPUCPipelineConfig{
-		DebugMode:          false, // Disable debug mode for background processing
+		DebugMode:          debugMode,
 		IntermediateSource: req.IntermediateSource,
 	}
 
@@ -113,8 +119,8 @@ func processPipelineHandler(ctx context.Context, req PipelineTaskRequest) error 
 }
 
 // EnqueuePipelineTask adds a new pipeline task to the queue
-func EnqueuePipelineTask(govID string, intermediateSource pipelines.IntermediateSource) (string, error) {
-	if PipelineQueue == nil {
+func EnqueuePipelineTask(govID string, intermediateSource pipelines.IntermediateSource, debugMode bool) (string, error) {
+	if Client == nil {
 		return "", ErrQueueNotInitialized
 	}
 
@@ -126,17 +132,26 @@ func EnqueuePipelineTask(govID string, intermediateSource pipelines.Intermediate
 		IntermediateSource: intermediateSource,
 		RequestID:          requestID,
 		Timestamp:          time.Now(),
+		DebugMode:          debugMode,
 	}
 
-	ctx := context.Background()
-	task := PipelineTask.WithArgs(ctx, req)
+	// Marshal the request to JSON
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal task payload: %w", err)
+	}
 
-	err := PipelineQueue.Add(task)
+	// Create asynq task
+	task := asynq.NewTask(TypePipelineTask, payload, asynq.MaxRetry(3))
+
+	// Enqueue the task
+	info, err := Client.Enqueue(task)
 	if err != nil {
 		return "", fmt.Errorf("failed to enqueue pipeline task: %w", err)
 	}
 
-	log.Printf("📋 [Queue] Enqueued pipeline task for GovID: %s (RequestID: %s)", govID, requestID)
+	log.Printf("📋 [Queue] Enqueued pipeline task for GovID: %s (RequestID: %s, TaskID: %s)",
+		govID, requestID, info.ID)
 	return requestID, nil
 }
 
@@ -178,4 +193,96 @@ func GetTaskResult(requestID string) (*PipelineTaskResult, error) {
 	log.Printf("🔍 [Storage] Would retrieve result for RequestID: %s", requestID)
 
 	return nil, fmt.Errorf("task result retrieval not yet implemented")
+}
+
+// BulkQueueMissingGovIds finds missing govids and queues a random subset for processing
+func BulkQueueMissingGovIds(limit int, intermediateSource pipelines.IntermediateSource, debugMode bool) (*BulkQueueResult, error) {
+	if Client == nil {
+		return nil, ErrQueueNotInitialized
+	}
+
+	log.Printf("🔍 [Bulk Queue] Finding missing govids for bulk processing...")
+
+	// Get binary paths
+	scraperPaths := core.GetScraperPaths()
+	dokitoPaths := core.GetDokitoPaths()
+
+	// Get missing govids
+	missingGovIds, err := pipelines.GetMissingGovIds(scraperPaths, dokitoPaths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get missing govids: %w", err)
+	}
+
+	totalMissing := len(missingGovIds)
+	log.Printf("📊 [Bulk Queue] Found %d missing govids", totalMissing)
+
+	if totalMissing == 0 {
+		return &BulkQueueResult{
+			TotalMissing: 0,
+			Queued:       0,
+			QueuedGovIds: []string{},
+			Message:      "No missing govids found - all dockets are already in the database",
+		}, nil
+	}
+
+	// Randomize the order
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(missingGovIds), func(i, j int) {
+		missingGovIds[i], missingGovIds[j] = missingGovIds[j], missingGovIds[i]
+	})
+
+	// Apply limit
+	toQueue := missingGovIds
+	if limit > 0 && limit < len(missingGovIds) {
+		toQueue = missingGovIds[:limit]
+		log.Printf("📋 [Bulk Queue] Limiting to %d govids (from %d total missing)", limit, totalMissing)
+	}
+
+	// Queue the tasks
+	var queuedGovIds []string
+	var queueErrors []string
+
+	log.Printf("📤 [Bulk Queue] Queueing %d pipeline tasks...", len(toQueue))
+
+	for i, govID := range toQueue {
+		_, err := EnqueuePipelineTask(govID, intermediateSource, debugMode)
+		if err != nil {
+			log.Printf("⚠️  [Bulk Queue] Failed to queue %s: %v", govID, err)
+			queueErrors = append(queueErrors, fmt.Sprintf("%s: %v", govID, err))
+			continue
+		}
+
+		queuedGovIds = append(queuedGovIds, govID)
+
+		// Log progress every 100 items
+		if (i+1)%100 == 0 {
+			log.Printf("📊 [Bulk Queue] Progress: %d/%d queued", i+1, len(toQueue))
+		}
+	}
+
+	result := &BulkQueueResult{
+		TotalMissing: totalMissing,
+		Queued:       len(queuedGovIds),
+		QueuedGovIds: queuedGovIds,
+		Errors:       queueErrors,
+	}
+
+	if len(queueErrors) > 0 {
+		result.Message = fmt.Sprintf("Queued %d out of %d govids. %d errors occurred.",
+			len(queuedGovIds), len(toQueue), len(queueErrors))
+	} else {
+		result.Message = fmt.Sprintf("Successfully queued %d govids for processing.", len(queuedGovIds))
+	}
+
+	log.Printf("✅ [Bulk Queue] Completed: %d queued, %d errors", len(queuedGovIds), len(queueErrors))
+	return result, nil
+}
+
+// BulkQueueResult represents the result of a bulk queueing operation
+type BulkQueueResult struct {
+	TotalMissing int      `json:"total_missing"`
+	Queued       int      `json:"queued"`
+	QueuedGovIds []string `json:"queued_gov_ids"`
+	Errors       []string `json:"errors,omitempty"`
+	Message      string   `json:"message"`
 }

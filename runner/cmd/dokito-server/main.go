@@ -36,22 +36,29 @@ import (
 func main() {
 	// Parse command line arguments for server mode
 	port := 8080
+	debugMode := false
+
 	if len(os.Args) > 1 {
 		if p, err := strconv.Atoi(os.Args[1]); err == nil {
 			port = p
 		}
 	}
 
-	// Check for -port flag
+	// Check for flags
 	for i, arg := range os.Args {
 		if arg == "-port" && i+1 < len(os.Args) {
 			if p, err := strconv.Atoi(os.Args[i+1]); err == nil {
 				port = p
 			}
+		} else if arg == "--debug" {
+			debugMode = true
 		}
 	}
 
-	log.Printf("🚀 Starting Dokito Job Processing Server on port %d", port)
+	log.Printf("🚀 Starting Dokito Job Processing Server on port %d (debug: %t)", port, debugMode)
+
+	// Set global debug mode for worker tasks
+	worker.SetGlobalDebugMode(debugMode)
 
 	// Initialize background task queues
 	log.Printf("🔧 Initializing task queues...")
@@ -107,6 +114,8 @@ func main() {
 	log.Printf("📋 Health check: http://localhost:%d/api/health", port)
 	log.Printf("🎯 Full pipeline: POST http://localhost:%d/api/pipeline/full", port)
 	log.Printf("⚡ Async pipeline: POST http://localhost:%d/api/pipeline/async", port)
+	log.Printf("📦 Bulk queue: POST http://localhost:%d/api/pipeline/bulk-queue", port)
+	log.Printf("📊 Queue status: GET http://localhost:%d/api/queue/status", port)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("❌ Server failed to start: %v", err)

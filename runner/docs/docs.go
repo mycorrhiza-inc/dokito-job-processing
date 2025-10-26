@@ -114,6 +114,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/pipeline/bulk-queue": {
+            "post": {
+                "description": "Find missing govids, randomize them, and queue a limited number for background processing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipeline"
+                ],
+                "summary": "Bulk queue missing govids",
+                "parameters": [
+                    {
+                        "description": "Bulk queue request with optional limit and intermediate source",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.BulkQueueRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.BulkQueueResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.BulkQueueResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/pipeline/full": {
             "post": {
                 "description": "Execute the complete data pipeline for a given government ID including scraping, processing, and uploading",
@@ -222,6 +280,49 @@ const docTemplate = `{
                 },
                 "success": {
                     "type": "boolean"
+                }
+            }
+        },
+        "api.BulkQueueRequest": {
+            "type": "object",
+            "properties": {
+                "intermediate_source": {
+                    "$ref": "#/definitions/pipelines.IntermediateSource"
+                },
+                "limit": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.BulkQueueResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "queued": {
+                    "type": "integer"
+                },
+                "queued_gov_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "total_missing": {
+                    "type": "integer"
                 }
             }
         },

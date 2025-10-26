@@ -20,6 +20,34 @@ definitions:
       success:
         type: boolean
     type: object
+  api.BulkQueueRequest:
+    properties:
+      intermediate_source:
+        $ref: '#/definitions/pipelines.IntermediateSource'
+      limit:
+        type: integer
+    type: object
+  api.BulkQueueResponse:
+    properties:
+      error:
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+      queued:
+        type: integer
+      queued_gov_ids:
+        items:
+          type: string
+        type: array
+      success:
+        type: boolean
+      total_missing:
+        type: integer
+    type: object
   api.FullPipelineRequest:
     properties:
       gov_id:
@@ -155,6 +183,45 @@ paths:
           schema:
             $ref: '#/definitions/api.AsyncPipelineResponse'
       summary: Execute async pipeline
+      tags:
+      - pipeline
+  /api/pipeline/bulk-queue:
+    post:
+      consumes:
+      - application/json
+      description: Find missing govids, randomize them, and queue a limited number
+        for background processing
+      parameters:
+      - description: Bulk queue request with optional limit and intermediate source
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.BulkQueueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.BulkQueueResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.BulkQueueResponse'
+      summary: Bulk queue missing govids
       tags:
       - pipeline
   /api/pipeline/full:
