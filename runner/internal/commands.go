@@ -2,6 +2,7 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -155,8 +156,17 @@ func RunPipeline() {
 	fmt.Printf("  Debug Mode: %t\n", config.DebugMode)
 	fmt.Println("")
 
+	// Create execution context with config from CLI args
+	var execConfig *core.ExecutionConfig
+	if config.DebugMode {
+		execConfig = core.NewExecutionConfigWithDebug()
+	} else {
+		execConfig = core.NewExecutionConfig()
+	}
+	ctx := core.WithExecutionConfig(context.Background(), execConfig)
+
 	// Execute the shared NY PUC pipeline
-	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(govID, config)
+	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(ctx, govID, config)
 	if err != nil {
 		log.Printf("❌ Pipeline failed: %v", err)
 		os.Exit(1)
@@ -176,8 +186,8 @@ func RunScrapeOnly() {
 	govID := strings.TrimSpace(os.Args[2])
 	log.Printf("🔍 Running scraper only for govID: %s", govID)
 
-	// Get binary paths
-	scraperPaths := core.GetScraperPaths()
+	// Create execution context with debug enabled for CLI
+	ctx := core.WithExecutionConfig(context.Background(), core.NewExecutionConfigWithDebug())
 
 	// Initialize mapping and determine scraper type
 	mapping := core.GetDefaultGovIDMapping()
@@ -186,7 +196,7 @@ func RunScrapeOnly() {
 	log.Printf("📋 Using scraper type: %s", scraperType)
 
 	// Execute scraper
-	results, err := core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
+	results, err := core.ExecuteScraperWithALLMode(ctx, govID, scraperType)
 	if err != nil {
 		log.Printf("❌ Scraper execution failed: %v", err)
 		os.Exit(1)
@@ -227,11 +237,11 @@ func RunProcessOnly() {
 		os.Exit(1)
 	}
 
-	// Get dokito paths
-	dokitoPaths := core.GetDokitoPaths()
+	// Create execution context with debug enabled for CLI
+	ctx := core.WithExecutionConfig(context.Background(), core.NewExecutionConfigWithDebug())
 
 	// Process data
-	results, err := core.ExecuteDataProcessingBinary(inputData, dokitoPaths)
+	results, err := core.ExecuteDataProcessingBinary(ctx, inputData)
 	if err != nil {
 		log.Printf("❌ Data processing failed: %v", err)
 		os.Exit(1)
@@ -272,11 +282,11 @@ func RunUploadOnly() {
 		os.Exit(1)
 	}
 
-	// Get dokito paths
-	dokitoPaths := core.GetDokitoPaths()
+	// Create execution context with debug enabled for CLI
+	ctx := core.WithExecutionConfig(context.Background(), core.NewExecutionConfigWithDebug())
 
 	// Upload data
-	if err := core.ExecuteUploadBinary(inputData, dokitoPaths); err != nil {
+	if err := core.ExecuteUploadBinary(ctx, inputData); err != nil {
 		log.Printf("❌ Upload failed: %v", err)
 		os.Exit(1)
 	}
@@ -287,12 +297,11 @@ func RunUploadOnly() {
 func RunMissingGovIds() {
 	log.Printf("🔍 Finding NY PUC govids not in database")
 
-	// Get binary paths
-	scraperPaths := core.GetScraperPaths()
-	dokitoPaths := core.GetDokitoPaths()
+	// Create execution context with debug enabled for CLI
+	ctx := core.WithExecutionConfig(context.Background(), core.NewExecutionConfigWithDebug())
 
 	// Get missing govids
-	missingGovIds, err := pipelines.GetMissingGovIds(scraperPaths, dokitoPaths)
+	missingGovIds, err := pipelines.GetMissingGovIds(ctx)
 	if err != nil {
 		log.Printf("❌ Failed to get missing govids: %v", err)
 		os.Exit(1)
@@ -378,6 +387,15 @@ func RunBulkQueue() {
 
 	log.Printf("🚀 Starting bulk queue operation (limit: %d, source: %s, debug: %t)", limit, intermediateSource, debugMode)
 
+	// Create execution context with debug mode from CLI args
+	var config *core.ExecutionConfig
+	if debugMode {
+		config = core.NewExecutionConfigWithDebug()
+	} else {
+		config = core.NewExecutionConfig()
+	}
+	ctx := core.WithExecutionConfig(context.Background(), config)
+
 	// Initialize queues first
 	if err := worker.InitializeQueues(); err != nil {
 		log.Printf("❌ Failed to initialize task queues: %v", err)
@@ -388,7 +406,7 @@ func RunBulkQueue() {
 	worker.RegisterTasks()
 
 	// Execute bulk queue operation
-	result, err := worker.BulkQueueMissingGovIds(limit, intermediateSource, debugMode)
+	result, err := worker.BulkQueueMissingGovIds(ctx, limit, intermediateSource)
 	if err != nil {
 		log.Printf("❌ Bulk queue operation failed: %v", err)
 		os.Exit(1)

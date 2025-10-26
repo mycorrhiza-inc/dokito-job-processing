@@ -109,8 +109,7 @@ func retrieveIntermediateData(ctx context.Context, govID string, source Intermed
 	case IntermediateSourceHTML:
 		log.Printf("🌐 Running scraper with --source-s3 flag for HTML snapshots for %s", govID)
 
-		// Get binary paths and scraper type
-		scraperPaths := core.GetScraperPaths()
+		// Get scraper type for the govID
 		mapping := core.GetDefaultGovIDMapping()
 		scraperType := mapping.GetScraperForGovID(govID)
 
@@ -118,11 +117,7 @@ func retrieveIntermediateData(ctx context.Context, govID string, source Intermed
 		var scrapeResults []map[string]any
 		var err error
 
-		if config.DebugMode {
-			scrapeResults, err = core.ExecuteScraperWithALLModeDebug(govID, scraperType, scraperPaths, "--source-s3")
-		} else {
-			scrapeResults, err = core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths, "--source-s3")
-		}
+		scrapeResults, err = core.ExecuteScraperWithALLMode(ctx, govID, scraperType, "--source-s3")
 
 		if err != nil {
 			return nil, fmt.Errorf("failed to process HTML snapshots with --source-s3: %v", err)
@@ -137,11 +132,13 @@ func retrieveIntermediateData(ctx context.Context, govID string, source Intermed
 // ExecuteNYPUCBasicPipeline runs the complete NY PUC pipeline for a given government ID
 // This includes scraping, saving raw data, processing, saving processed data, and uploading
 func ExecuteNYPUCBasicPipeline(govID string) (*NYPUCPipelineResult, error) {
-	return ExecuteNYPUCBasicPipelineWithConfig(govID, NYPUCPipelineConfig{DebugMode: false})
+	// Create execution context with debug disabled
+	ctx := core.WithExecutionConfig(context.Background(), core.NewExecutionConfig())
+	return ExecuteNYPUCBasicPipelineWithConfig(ctx, govID, NYPUCPipelineConfig{DebugMode: false})
 }
 
 // ExecuteNYPUCBasicPipelineWithConfig runs the NY PUC pipeline with configuration options
-func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfig) (*NYPUCPipelineResult, error) {
+func ExecuteNYPUCBasicPipelineWithConfig(ctx context.Context, govID string, config NYPUCPipelineConfig) (*NYPUCPipelineResult, error) {
 	pipelineStart := time.Now()
 	log.Printf("🚀 Starting NY PUC pipeline for govID: %s", govID)
 
@@ -149,10 +146,6 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 	if config.IntermediateSource == "" {
 		config.IntermediateSource = IntermediateSourceNone
 	}
-
-	// Get binary paths
-	scraperPaths := core.GetScraperPaths()
-	dokitoPaths := core.GetDokitoPaths()
 
 	// Initialize mapping and determine scraper type
 	mapping := core.GetDefaultGovIDMapping()
@@ -168,7 +161,6 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 	// Step 1: Get raw data based on intermediate source
 	var scrapeResults []map[string]any
 	var err error
-	ctx := context.Background()
 
 	// Handle different intermediate sources
 	if config.IntermediateSource != IntermediateSourceNone {
@@ -190,12 +182,7 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 		step1Start := time.Now()
 		log.Printf("📝 Step 1/4: Running scraper for %s", govID)
 
-		if config.DebugMode {
-			log.Printf("🐛 Debug mode enabled - streaming subprocess output")
-			scrapeResults, err = core.ExecuteScraperWithALLModeDebug(govID, scraperType, scraperPaths)
-		} else {
-			scrapeResults, err = core.ExecuteScraperWithALLMode(govID, scraperType, scraperPaths)
-		}
+		scrapeResults, err = core.ExecuteScraperWithALLMode(ctx, govID, scraperType)
 
 		if err != nil {
 			return result, NYPUCPipelineError{
@@ -264,11 +251,7 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 			}
 		}
 
-		if config.DebugMode {
-			processedResults, err = core.ExecuteDataProcessingBinaryDebug(validatedData, dokitoPaths)
-		} else {
-			processedResults, err = core.ExecuteDataProcessingBinary(validatedData, dokitoPaths)
-		}
+		processedResults, err = core.ExecuteDataProcessingBinary(ctx, validatedData)
 
 		if err != nil {
 			return result, NYPUCPipelineError{
@@ -322,11 +305,7 @@ func ExecuteNYPUCBasicPipelineWithConfig(govID string, config NYPUCPipelineConfi
 	// Step 3: Upload results
 	step3Start := time.Now()
 	log.Printf("📤 Step 3/4: Uploading processed data")
-	if config.DebugMode {
-		err = core.ExecuteUploadBinaryDebug(processedResults, dokitoPaths)
-	} else {
-		err = core.ExecuteUploadBinary(processedResults, dokitoPaths)
-	}
+	err = core.ExecuteUploadBinary(ctx, processedResults)
 
 	if err != nil {
 		return result, NYPUCPipelineError{

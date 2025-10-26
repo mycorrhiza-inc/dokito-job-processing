@@ -1,9 +1,9 @@
 package main
 
 import (
-	"runner/internal/cli"
+	"runner/internal"
 )
 
 func main() {
-	cli.Execute()
+	internal.RunCLI()
 }

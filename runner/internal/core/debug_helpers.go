@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"log"
 	"os/exec"
@@ -142,4 +143,57 @@ func executeWithDebugStreamingNoOutput(cmd *exec.Cmd, label string) error {
 
 	// Wait for command completion
 	return cmd.Wait()
+}
+
+// CommandContext creates a command with debug-aware execution based on execution context
+// This mimics exec.CommandContext but automatically handles debug streaming
+type DebugAwareCmd struct {
+	*exec.Cmd
+	ctx   context.Context
+	label string
+}
+
+// CommandContext creates a new DebugAwareCmd that will automatically use debug streaming if enabled in context
+func CommandContext(ctx context.Context, label string, name string, arg ...string) *DebugAwareCmd {
+	config := GetExecutionConfig(ctx)
+
+	// Create command with timeout from config
+	timeoutCtx, cancel := context.WithTimeout(ctx, config.Timeout)
+	cmd := exec.CommandContext(timeoutCtx, name, arg...)
+
+	// Store cancel function so it can be called when command completes
+	go func() {
+		<-timeoutCtx.Done()
+		cancel()
+	}()
+
+	return &DebugAwareCmd{
+		Cmd:   cmd,
+		ctx:   ctx,
+		label: label,
+	}
+}
+
+// Output runs the command and returns stdout, automatically using debug streaming if enabled
+func (c *DebugAwareCmd) Output() ([]byte, error) {
+	config := GetExecutionConfig(c.ctx)
+
+	if config.DebugMode {
+		return executeWithDebugStreaming(c.Cmd, c.label)
+	}
+
+	// Normal execution without debug streaming
+	return c.Cmd.Output()
+}
+
+// Run executes the command without collecting stdout, automatically using debug streaming if enabled
+func (c *DebugAwareCmd) Run() error {
+	config := GetExecutionConfig(c.ctx)
+
+	if config.DebugMode {
+		return executeWithDebugStreamingNoOutput(c.Cmd, c.label)
+	}
+
+	// Normal execution without debug streaming
+	return c.Cmd.Run()
 }

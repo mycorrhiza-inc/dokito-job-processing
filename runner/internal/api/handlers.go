@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ type FullPipelineRequest struct {
 type AsyncPipelineRequest struct {
 	GovID              string                        `json:"gov_id"`
 	IntermediateSource pipelines.IntermediateSource `json:"intermediate_source,omitempty"`
+	DebugMode          bool                          `json:"debug_mode,omitempty"`
 }
 
 type AsyncPipelineResponse struct {
@@ -246,8 +248,17 @@ func HandleAsyncPipeline(w http.ResponseWriter, r *http.Request) {
 
 	govID := strings.TrimSpace(req.GovID)
 
-	// Enqueue the pipeline task (disable debug mode for API requests)
-	requestID, err := worker.EnqueuePipelineTask(govID, req.IntermediateSource, false)
+	// Create execution context (disable debug mode for API requests unless explicitly requested)
+	var config *core.ExecutionConfig
+	if req.DebugMode {
+		config = core.NewExecutionConfigWithDebug()
+	} else {
+		config = core.NewExecutionConfig()
+	}
+	ctx := core.WithExecutionConfig(context.Background(), config)
+
+	// Enqueue the pipeline task
+	requestID, err := worker.EnqueuePipelineTask(ctx, govID, req.IntermediateSource)
 
 	response := AsyncPipelineResponse{
 		GovID: govID,
@@ -324,11 +335,20 @@ func HandleBulkQueue(w http.ResponseWriter, r *http.Request) {
 		limit = 1000
 	}
 
-	log.Printf("📋 [Bulk Queue API] Starting bulk queue operation (limit: %d, source: %s)",
-		limit, req.IntermediateSource)
+	log.Printf("📋 [Bulk Queue API] Starting bulk queue operation (limit: %d, source: %s, debug: %t)",
+		limit, req.IntermediateSource, req.DebugMode)
+
+	// Create execution context with debug mode from request
+	var config *core.ExecutionConfig
+	if req.DebugMode {
+		config = core.NewExecutionConfigWithDebug()
+	} else {
+		config = core.NewExecutionConfig()
+	}
+	ctx := core.WithExecutionConfig(context.Background(), config)
 
 	// Execute the bulk queue operation
-	result, err := worker.BulkQueueMissingGovIds(limit, req.IntermediateSource, req.DebugMode)
+	result, err := worker.BulkQueueMissingGovIds(ctx, limit, req.IntermediateSource)
 
 	response := BulkQueueResponse{}
 

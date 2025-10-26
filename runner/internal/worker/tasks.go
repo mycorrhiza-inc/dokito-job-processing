@@ -71,7 +71,7 @@ func processPipelineHandler(ctx context.Context, t *asynq.Task) error {
 	}
 
 	// Execute the pipeline
-	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(req.GovID, config)
+	result, err := pipelines.ExecuteNYPUCBasicPipelineWithConfig(ctx, req.GovID, config)
 
 	duration := time.Since(startTime)
 
@@ -119,7 +119,7 @@ func processPipelineHandler(ctx context.Context, t *asynq.Task) error {
 }
 
 // EnqueuePipelineTask adds a new pipeline task to the queue
-func EnqueuePipelineTask(govID string, intermediateSource pipelines.IntermediateSource, debugMode bool) (string, error) {
+func EnqueuePipelineTask(ctx context.Context, govID string, intermediateSource pipelines.IntermediateSource) (string, error) {
 	if Client == nil {
 		return "", ErrQueueNotInitialized
 	}
@@ -127,12 +127,15 @@ func EnqueuePipelineTask(govID string, intermediateSource pipelines.Intermediate
 	// Generate a unique request ID for tracking
 	requestID := fmt.Sprintf("pipeline_%s_%d", govID, time.Now().Unix())
 
+	// Get debug mode from execution context
+	config := core.GetExecutionConfig(ctx)
+
 	req := PipelineTaskRequest{
 		GovID:              govID,
 		IntermediateSource: intermediateSource,
 		RequestID:          requestID,
 		Timestamp:          time.Now(),
-		DebugMode:          debugMode,
+		DebugMode:          config.DebugMode,
 	}
 
 	// Marshal the request to JSON
@@ -196,19 +199,15 @@ func GetTaskResult(requestID string) (*PipelineTaskResult, error) {
 }
 
 // BulkQueueMissingGovIds finds missing govids and queues a random subset for processing
-func BulkQueueMissingGovIds(limit int, intermediateSource pipelines.IntermediateSource, debugMode bool) (*BulkQueueResult, error) {
+func BulkQueueMissingGovIds(ctx context.Context, limit int, intermediateSource pipelines.IntermediateSource) (*BulkQueueResult, error) {
 	if Client == nil {
 		return nil, ErrQueueNotInitialized
 	}
 
 	log.Printf("🔍 [Bulk Queue] Finding missing govids for bulk processing...")
 
-	// Get binary paths
-	scraperPaths := core.GetScraperPaths()
-	dokitoPaths := core.GetDokitoPaths()
-
-	// Get missing govids
-	missingGovIds, err := pipelines.GetMissingGovIds(scraperPaths, dokitoPaths)
+	// Get missing govids using execution context
+	missingGovIds, err := pipelines.GetMissingGovIds(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get missing govids: %w", err)
 	}
@@ -245,7 +244,7 @@ func BulkQueueMissingGovIds(limit int, intermediateSource pipelines.Intermediate
 	log.Printf("📤 [Bulk Queue] Queueing %d pipeline tasks...", len(toQueue))
 
 	for i, govID := range toQueue {
-		_, err := EnqueuePipelineTask(govID, intermediateSource, debugMode)
+		_, err := EnqueuePipelineTask(ctx, govID, intermediateSource)
 		if err != nil {
 			log.Printf("⚠️  [Bulk Queue] Failed to queue %s: %v", govID, err)
 			queueErrors = append(queueErrors, fmt.Sprintf("%s: %v", govID, err))
