@@ -91,3 +91,32 @@ func GetMissingGovIds(ctx context.Context) ([]string, error) {
 
 	return missingGovIds, nil
 }
+
+// GetMissingGovIdsFromMetadata returns a slice of NY PUC govids that are not currently in the database
+// This version takes pre-fetched metadata instead of scraping
+func GetMissingGovIdsFromMetadata(ctx context.Context, metadata []map[string]any) ([]string, error) {
+	// Extract govids from provided metadata
+	allGovIds := GovidsFromJsonDataFiltered(metadata)
+
+	// Get govids currently in database for NY PUC jurisdiction
+	dbGovIds, err := ExecuteDatabaseUtilsListDocketIds(ctx, "new_york_puc")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database govids: %v", err)
+	}
+
+	// Create a map for efficient lookup
+	dbGovIDSet := make(map[string]bool)
+	for _, govid := range dbGovIds {
+		dbGovIDSet[govid] = true
+	}
+
+	// Find govids that are in scraped data but not in database
+	var missingGovIds []string
+	for _, govid := range allGovIds {
+		if !dbGovIDSet[govid] {
+			missingGovIds = append(missingGovIds, govid)
+		}
+	}
+
+	return missingGovIds, nil
+}

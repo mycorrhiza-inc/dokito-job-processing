@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"runner/internal/core"
@@ -54,7 +55,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli scrape <gov_id>                                     - Run scraper only and print results")
 	fmt.Println("  dokito-cli process <json_file>                                 - Run processing only on JSON file")
 	fmt.Println("  dokito-cli upload <json_file>                                  - Run upload only on JSON file")
-	fmt.Println("  dokito-cli missing-govids                                      - Get NY PUC govids not currently in database")
+	fmt.Println("  dokito-cli missing-govids                                      - Get NY PUC govids not currently in database (accepts metadata via stdin)")
 	fmt.Println("  dokito-cli bulk-queue [--limit=N] [--source=<source>] [--no-debug] - Queue random missing govids for processing (debug on by default)")
 	fmt.Println("  dokito-cli env                                                 - Show environment configuration")
 	fmt.Println("")
@@ -72,6 +73,7 @@ func PrintUsage() {
 	fmt.Println("  dokito-cli pipeline --intermediate-source=processed_json 00-F-0229")
 	fmt.Println("  dokito-cli scrape 00-F-0229")
 	fmt.Println("  dokito-cli missing-govids")
+	fmt.Println("  cat metadata.json | dokito-cli missing-govids")
 	fmt.Println("  dokito-cli bulk-queue --limit=500 --source=html")
 	fmt.Println("  dokito-cli bulk-queue --limit=30 --source=html --no-debug")
 	fmt.Println("  dokito-cli env")
@@ -300,11 +302,51 @@ func RunMissingGovIds() {
 	// Create execution context with debug enabled for CLI
 	ctx := core.WithExecutionConfig(context.Background(), core.NewExecutionConfigWithDebug())
 
-	// Get missing govids
-	missingGovIds, err := pipelines.GetMissingGovIds(ctx)
+	var missingGovIds []string
+	var err error
+
+	// Check if there's data from stdin
+	stat, err := os.Stdin.Stat()
 	if err != nil {
-		log.Printf("❌ Failed to get missing govids: %v", err)
+		log.Printf("❌ Failed to check stdin: %v", err)
 		os.Exit(1)
+	}
+
+	if (stat.Mode() & os.ModeCharDevice) == 0 {
+		// Data is being piped in via stdin
+		log.Printf("📥 Reading metadata from stdin...")
+
+		stdinData, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			log.Printf("❌ Failed to read from stdin: %v", err)
+			os.Exit(1)
+		}
+
+		// Parse the JSON metadata from stdin
+		var metadata []map[string]any
+		if err := json.Unmarshal(stdinData, &metadata); err != nil {
+			log.Printf("❌ Failed to parse stdin JSON: %v", err)
+			os.Exit(1)
+		}
+
+		log.Printf("📋 Using %d metadata records from stdin", len(metadata))
+
+		// Get missing govids using provided metadata
+		missingGovIds, err = pipelines.GetMissingGovIdsFromMetadata(ctx, metadata)
+		if err != nil {
+			log.Printf("❌ Failed to get missing govids from metadata: %v", err)
+			os.Exit(1)
+		}
+	} else {
+		// No stdin data, fetch metadata by scraping
+		log.Printf("🔍 No stdin data detected, fetching metadata by scraping...")
+
+		// Get missing govids using scraping
+		missingGovIds, err = pipelines.GetMissingGovIds(ctx)
+		if err != nil {
+			log.Printf("❌ Failed to get missing govids: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	log.Printf("✅ Found %d govids not currently in database", len(missingGovIds))
