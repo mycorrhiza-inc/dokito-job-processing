@@ -255,6 +255,9 @@ const docTemplate = `{
         "api.AsyncPipelineRequest": {
             "type": "object",
             "properties": {
+                "debug_mode": {
+                    "type": "boolean"
+                },
                 "gov_id": {
                     "type": "string"
                 },
@@ -286,6 +289,9 @@ const docTemplate = `{
         "api.BulkQueueRequest": {
             "type": "object",
             "properties": {
+                "debug_mode": {
+                    "type": "boolean"
+                },
                 "intermediate_source": {
                     "$ref": "#/definitions/pipelines.IntermediateSource"
                 },
@@ -422,7 +428,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
 	Title:            "Dokito Job Processing API",

@@ -19,7 +19,6 @@
         },
         "version": "1.0"
     },
-    "host": "localhost:8080",
     "basePath": "/",
     "paths": {
         "/api/health": {
@@ -253,6 +252,9 @@
         "api.AsyncPipelineRequest": {
             "type": "object",
             "properties": {
+                "debug_mode": {
+                    "type": "boolean"
+                },
                 "gov_id": {
                     "type": "string"
                 },
@@ -284,6 +286,9 @@
         "api.BulkQueueRequest": {
             "type": "object",
             "properties": {
+                "debug_mode": {
+                    "type": "boolean"
+                },
                 "intermediate_source": {
                     "$ref": "#/definitions/pipelines.IntermediateSource"
                 },

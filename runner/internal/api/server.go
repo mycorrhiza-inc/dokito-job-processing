@@ -24,7 +24,7 @@ func SetupRoutes() *http.ServeMux {
 
 	// Swagger documentation
 	mux.Handle("/swagger/", httpSwagger.Handler(
-		httpSwagger.URL("http://localhost:8080/swagger/doc.json"),
+		httpSwagger.URL("/swagger/doc.json"),
 	))
 
 	return mux
