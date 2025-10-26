@@ -1,10 +1,61 @@
+basePath: /
 definitions:
-  main.FullPipelineRequest:
+  api.AsyncPipelineRequest:
     properties:
       gov_id:
         type: string
+      intermediate_source:
+        $ref: '#/definitions/pipelines.IntermediateSource'
     type: object
-  main.FullPipelineResponse:
+  api.AsyncPipelineResponse:
+    properties:
+      error:
+        type: string
+      gov_id:
+        type: string
+      message:
+        type: string
+      request_id:
+        type: string
+      success:
+        type: boolean
+    type: object
+  api.BulkQueueRequest:
+    properties:
+      intermediate_source:
+        $ref: '#/definitions/pipelines.IntermediateSource'
+      limit:
+        type: integer
+    type: object
+  api.BulkQueueResponse:
+    properties:
+      error:
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+      queued:
+        type: integer
+      queued_gov_ids:
+        items:
+          type: string
+        type: array
+      success:
+        type: boolean
+      total_missing:
+        type: integer
+    type: object
+  api.FullPipelineRequest:
+    properties:
+      gov_id:
+        type: string
+      intermediate_source:
+        $ref: '#/definitions/pipelines.IntermediateSource'
+    type: object
+  api.FullPipelineResponse:
     properties:
       error:
         type: string
@@ -21,7 +72,7 @@ definitions:
       success:
         type: boolean
     type: object
-  main.HealthResponse:
+  api.HealthResponse:
     properties:
       services:
         additionalProperties:
@@ -32,8 +83,48 @@ definitions:
       timestamp:
         type: string
     type: object
+  api.QueueStatusResponse:
+    properties:
+      queue_stats:
+        additionalProperties: true
+        type: object
+    type: object
+  pipelines.IntermediateSource:
+    enum:
+    - none
+    - html
+    - raw_json
+    - processed_json
+    type: string
+    x-enum-comments:
+      IntermediateSourceHTML: Retrieve from HTML snapshots in S3/local storage
+      IntermediateSourceNone: No intermediate source, run full scraping
+      IntermediateSourceProcessedJSON: Retrieve from processed JSON objects storage
+      IntermediateSourceRawJSON: Retrieve from raw JSON objects storage
+    x-enum-descriptions:
+    - No intermediate source, run full scraping
+    - Retrieve from HTML snapshots in S3/local storage
+    - Retrieve from raw JSON objects storage
+    - Retrieve from processed JSON objects storage
+    x-enum-varnames:
+    - IntermediateSourceNone
+    - IntermediateSourceHTML
+    - IntermediateSourceRawJSON
+    - IntermediateSourceProcessedJSON
+host: localhost:8080
 info:
-  contact: {}
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: API for managing data scraping, processing, and upload pipelines for
+    government documents
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Dokito Job Processing API
+  version: "1.0"
 paths:
   /api/health:
     get:
@@ -46,7 +137,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/main.HealthResponse'
+            $ref: '#/definitions/api.HealthResponse'
         "405":
           description: Method Not Allowed
           schema:
@@ -56,26 +147,25 @@ paths:
       summary: Health check endpoint
       tags:
       - health
-  /api/pipeline/full:
+  /api/pipeline/async:
     post:
       consumes:
       - application/json
-      description: Execute the complete data pipeline for a given government ID including
-        scraping, processing, and uploading
+      description: Queue a pipeline task for background processing
       parameters:
-      - description: Pipeline request with government ID
+      - description: Async pipeline request with government ID
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/main.FullPipelineRequest'
+          $ref: '#/definitions/api.AsyncPipelineRequest'
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
           schema:
-            $ref: '#/definitions/main.FullPipelineResponse'
+            $ref: '#/definitions/api.AsyncPipelineResponse'
         "400":
           description: Bad Request
           schema:
@@ -91,8 +181,102 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/main.FullPipelineResponse'
+            $ref: '#/definitions/api.AsyncPipelineResponse'
+      summary: Execute async pipeline
+      tags:
+      - pipeline
+  /api/pipeline/bulk-queue:
+    post:
+      consumes:
+      - application/json
+      description: Find missing govids, randomize them, and queue a limited number
+        for background processing
+      parameters:
+      - description: Bulk queue request with optional limit and intermediate source
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.BulkQueueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.BulkQueueResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.BulkQueueResponse'
+      summary: Bulk queue missing govids
+      tags:
+      - pipeline
+  /api/pipeline/full:
+    post:
+      consumes:
+      - application/json
+      description: Execute the complete data pipeline for a given government ID including
+        scraping, processing, and uploading
+      parameters:
+      - description: Pipeline request with government ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.FullPipelineRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.FullPipelineResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.FullPipelineResponse'
       summary: Execute full pipeline
       tags:
       - pipeline
+  /api/queue/status:
+    get:
+      description: Get the current status of the background task queues
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.QueueStatusResponse'
+      summary: Get queue status
+      tags:
+      - queue
+schemes:
+- http
+- https
 swagger: "2.0"

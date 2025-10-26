@@ -1,4 +1,3 @@
-
 import { Scraper } from "./pipeline";
 import {
   RawGenericDocket,
@@ -33,7 +32,7 @@ interface ScrapingOptions {
   fromFile?: string;
   outFile?: string;
   headed?: boolean;
-  missing?: boolean;
+  fetchAllDocketMetadata?: boolean;
   todayFilings?: boolean;
   intermediateDir?: string;
   useS3Source?: boolean;
@@ -69,7 +68,9 @@ class NyPucScraper {
 
     if (useS3Source) {
       this.s3Backend = new S3StorageBackend();
-      console.error("S3 source mode enabled - will only scrape from S3 storage");
+      console.error(
+        "S3 source mode enabled - will only scrape from S3 storage",
+      );
     }
   }
 
@@ -434,7 +435,10 @@ class NyPucScraper {
         );
       }
 
-      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(url, stage);
+      const snapshotResult = await this.s3Backend!.findMostRecentSnapshot(
+        url,
+        stage,
+      );
       if (!snapshotResult) {
         throw new Error(
           `No S3 snapshot found for ${url} at stage ${stage}. ` +
@@ -447,10 +451,10 @@ class NyPucScraper {
 
       console.error(
         `Loaded HTML from S3 for ${url}\n` +
-        `  Stage: ${metadata.stage}\n` +
-        `  Saved at: ${metadata.saved_at}\n` +
-        `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
-        `  Size: ${metadata.file_size} bytes`
+          `  Stage: ${metadata.stage}\n` +
+          `  Saved at: ${metadata.saved_at}\n` +
+          `  Hash: ${metadata.blake2_hash.substring(0, 16)}...\n` +
+          `  Size: ${metadata.file_size} bytes`,
       );
     } else {
       // EXISTING: Use browser navigation
@@ -495,7 +499,10 @@ class NyPucScraper {
             try {
               await context.close();
             } catch (closeError) {
-              console.error("Error closing context:", (closeError as Error).message);
+              console.error(
+                "Error closing context:",
+                (closeError as Error).message,
+              );
             }
           }
 
@@ -596,38 +603,6 @@ class NyPucScraper {
     return cases;
   }
 
-  // TODO: This should probably get filtered out to the general task running layer.
-  async filterOutExisting(
-    cases: Partial<RawGenericDocket>[],
-  ): Promise<Partial<RawGenericDocket>[]> {
-    const caseDiffUrl =
-      "http://localhost:33399/public/caselist/ny/ny_puc/casedata_differential";
-
-    try {
-      const response = await fetch(caseDiffUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cases),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (!data || !Array.isArray(data.to_process)) {
-        throw new Error("Invalid response format: missing 'to_process' array");
-      }
-
-      // Assume the backend returns objects in the correct RawGenericDocket shape
-      return data.to_process as RawGenericDocket[];
-    } catch (err) {
-      console.error("filterOutExisting failed:", err);
-      return [];
-    }
-  }
-
   // gets ALL cases
   async getAllCaseList(): Promise<Partial<RawGenericDocket>[]> {
     const industry_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -638,11 +613,6 @@ class NyPucScraper {
     });
     const results = await Promise.all(promises);
     return results.flat();
-  }
-  async getAllMissingCaseList(): Promise<Partial<RawGenericDocket>[]> {
-    const cases = await this.getAllCaseList();
-    const filtered_cases = await this.filterOutExisting(cases);
-    return filtered_cases;
   }
 
   private async scrapeIndustryAffectedFromFillingsHtml(
@@ -1562,28 +1532,36 @@ class NyPucScraper {
     partialDockets: Partial<RawGenericDocket>[],
     mode: ScrapingMode,
   ): Promise<Partial<RawGenericDocket>[]> {
-    // Collect valid case_govid values
-    const govIds = partialDockets
-      .map((d) => d.case_govid)
-      .filter(
-        (id): id is string => typeof id === "string" && id.trim().length > 0,
-      );
-
-    // Call the existing scraper with those IDs
-    return this.scrapeByGovIds(govIds, mode);
+    // Call the existing scraper with the dockets directly
+    return this.scrapeByGovIds(partialDockets, mode);
   }
 
   async scrapeByGovIds(
-    govIds: string[],
+    dockets: Partial<RawGenericDocket>[],
     mode: ScrapingMode,
   ): Promise<Partial<RawGenericDocket>[]> {
-    console.error(
-      `Scraping ${govIds.length} cases in ${mode} mode (parallel processing)`,
+    // Validate that all dockets have case_govid
+    const validDockets = dockets.filter(
+      (d) =>
+        d.case_govid &&
+        typeof d.case_govid === "string" &&
+        d.case_govid.trim().length > 0,
     );
 
-    const processId = async (
-      govId: string,
+    if (validDockets.length !== dockets.length) {
+      console.warn(
+        `Warning: ${dockets.length - validDockets.length} dockets missing case_govid, skipping them`,
+      );
+    }
+
+    console.error(
+      `Scraping ${validDockets.length} cases in ${mode} mode (parallel processing)`,
+    );
+
+    const processDocket = async (
+      docket: Partial<RawGenericDocket>,
     ): Promise<Partial<RawGenericDocket> | null> => {
+      const govId = docket.case_govid!;
       try {
         switch (mode) {
           case ScrapingMode.METADATA:
@@ -1592,16 +1570,16 @@ class NyPucScraper {
           case ScrapingMode.filing: {
             const result = await this.scrapeDocumentsOnly(govId);
             const filings = Array.isArray(result) ? result : result.documents;
-            return { case_govid: govId, filings };
+            return { ...docket, filings };
           }
 
           case ScrapingMode.PARTIES: {
             const parties = await this.scrapePartiesOnly(govId);
-            return { case_govid: govId, case_parties: parties };
+            return { ...docket, case_parties: parties };
           }
 
           case ScrapingMode.IDS_ONLY: {
-            return { case_govid: govId };
+            return docket; // Return the original docket with all its metadata
           }
 
           case ScrapingMode.ALL: {
@@ -1641,12 +1619,13 @@ class NyPucScraper {
               parties = await this.scrapePartiesOnly(govId);
             }
 
-            let return_case: Partial<RawGenericDocket> = metadata || {
+            let return_case: Partial<RawGenericDocket> = {
+              ...docket, // Preserve original metadata
+              ...metadata, // Merge any new metadata from case page
               case_govid: govId,
+              filings: documents,
+              case_parties: parties,
             };
-            return_case.case_govid = govId;
-            return_case.filings = documents;
-            return_case.case_parties = parties;
 
             return return_case;
           }
@@ -1656,33 +1635,9 @@ class NyPucScraper {
         return null;
       }
     };
-    const processIdAndUpload = async (
-      govID: string,
-    ): Promise<Partial<RawGenericDocket> | null> => {
-      let return_result = null;
-      try {
-        return_result = await processId(govID);
-        if (return_result !== null) {
-          console.error(return_result.case_govid);
-          // Upload disabled
-          // try {
-          //   await pushResultsToUploader([return_result], mode);
-          // } catch (e) {
-          //   console.error(e);
-          // }
-        } else {
-          console.error("Result was equal to null.");
-        }
-        return return_result;
-      } catch (err) {
-        console.error(err);
-        return return_result;
-      }
-    };
-
     const results = await this.processTasksWithQueue(
-      govIds,
-      processIdAndUpload,
+      validDockets,
+      processDocket,
     );
     return results.filter(
       (result): result is Partial<RawGenericDocket> => result !== null,
@@ -1710,13 +1665,15 @@ class NyPucScraper {
     const $ = await this.getPage(url);
     const docketGovIds: string[] = [];
 
-    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each((i: number, row: any) => {
-      const cells = $(row).find("td");
-      const docketGovId = $(cells[4]).find("a").text().trim();
-      if (docketGovId) {
-        docketGovIds.push(docketGovId);
-      }
-    });
+    $("#tblSearchedDocumentExternal > tbody:nth-child(3) tr").each(
+      (i: number, row: any) => {
+        const cells = $(row).find("td");
+        const docketGovId = $(cells[4]).find("a").text().trim();
+        if (docketGovId) {
+          docketGovIds.push(docketGovId);
+        }
+      },
+    );
     const govid_set = new Set(docketGovIds);
 
     return [...govid_set]; // Return unique values
@@ -1761,11 +1718,14 @@ class NyPucScraper {
       return [];
     }
 
+    // Convert case numbers to docket objects
+    const dockets = caseNumbers.map((govId) => ({ case_govid: govId }));
+
     // Run full scraping pipeline for each case
     console.error(
       `Scraping complete data for ${caseNumbers.length} cases in ${mode} mode`,
     );
-    const results = await this.scrapeByGovIds(caseNumbers, mode);
+    const results = await this.scrapeByGovIds(dockets, mode);
 
     console.error(
       `Today's filings workflow complete. Processed ${results.length} cases.`,
@@ -1789,7 +1749,7 @@ function parseArguments(): ScrapingOptions | null {
   let fromFile: string | undefined;
   let outFile: string | undefined;
   let headed = false; // Default to headless
-  let missing = false; // Default to not checking for missing
+  let fetchAllDocketMetadata = false; // Default to not fetching all docket metadata
   let todayFilings = false; // Default to not running today's filings workflow
   let intermediateDir: string | undefined;
   let useS3Source = false; // Default to not using S3 source
@@ -1826,8 +1786,8 @@ function parseArguments(): ScrapingOptions | null {
       outFile = args[++i];
     } else if (arg === "--headed") {
       headed = true;
-    } else if (arg === "--missing") {
-      missing = true;
+    } else if (arg === "--fetch-all-docket-metadata") {
+      fetchAllDocketMetadata = true;
     } else if (arg === "--today-filings") {
       todayFilings = true;
     } else if (arg === "--intermediate-dir") {
@@ -1870,7 +1830,7 @@ function parseArguments(): ScrapingOptions | null {
     fromFile,
     outFile,
     headed,
-    missing,
+    fetchAllDocketMetadata,
     todayFilings,
     intermediateDir,
     useS3Source,
@@ -1894,67 +1854,6 @@ async function saveResultsToFile(
   } catch (error) {
     console.error(`❌ Error writing to file ${outFile}:`, error);
     throw error;
-  }
-}
-// TODO: This should 100% be in the }task handling layer.
-// (And actually it might be a good idea for the task runner to just save the stuff to s3 directly? Food for thought.)
-async function pushResultsToUploader(
-  results: Partial<RawGenericDocket>[],
-  mode: ScrapingMode,
-) {
-  let upload_type = "all";
-  if (mode == ScrapingMode.filing) {
-    upload_type = "only_filing";
-  }
-  if (mode == ScrapingMode.PARTIES) {
-    upload_type = "only_parties";
-  }
-  if (mode == ScrapingMode.METADATA) {
-    upload_type = "only_metadata";
-  }
-  if (mode == ScrapingMode.IDS_ONLY) {
-    upload_type = "ids_only";
-  }
-  if (mode == ScrapingMode.ALL) {
-    upload_type = "all";
-  }
-  const url = "http://localhost:33399/admin/cases/upload_raw";
-
-  console.error(`Uploading ${results.length} with mode ${mode} to uploader.`);
-
-  try {
-    const payload = results.map((docket) => ({
-      docket,
-      upload_type,
-      jurisdiction: {
-        country: "usa",
-        jurisdiction: "ny_puc",
-        state: "ny",
-      },
-    }));
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `Upload failed: ${response.status} ${response.statusText} - ${errorText}`,
-      );
-    }
-    let govid_list = results.map((x) => x.case_govid);
-    console.error(`Successfully uploaded dockets to s3: ${govid_list}`);
-
-    return "successfully uploaded docket";
-  } catch (err) {
-    console.error("Error uploading results:", err);
-    // throw err;
-    return null;
   }
 }
 
@@ -1982,13 +1881,12 @@ async function runCustomScraping(
   }
 
   let casesToScrape: Partial<RawGenericDocket>[] = [];
-  let govIds: string[] = [];
 
   // Determine which cases to scrape based on provided arguments
   if (options.govIds && options.govIds.length > 0) {
-    // Explicit gov IDs provided
-    govIds = options.govIds;
-    console.error(`Using ${govIds.length} explicitly provided gov IDs`);
+    // Explicit gov IDs provided - convert to docket objects
+    casesToScrape = options.govIds.map((govId) => ({ case_govid: govId }));
+    console.error(`Using ${options.govIds.length} explicitly provided gov IDs`);
   } else if (options.dateString) {
     // Single date provided
     console.error(`Getting cases for date: ${options.dateString}`);
@@ -2010,33 +1908,26 @@ async function runCustomScraping(
     );
   } else {
     // No specific cases provided
-    if (options.missing) {
-      console.error("No specific cases provided, getting all missing cases");
-      casesToScrape = await scraper.getAllMissingCaseList();
-      console.error(`Found ${casesToScrape.length} missing cases`);
-    } else {
-      console.error("No specific cases provided, getting all cases");
+    if (options.fetchAllDocketMetadata) {
+      console.error("Fetching all docket metadata from the website");
       casesToScrape = await scraper.getAllCaseList();
       console.error(`Found ${casesToScrape.length} cases`);
+    } else {
+      throw new Error(
+        "No cases specified. Use --gov-ids, --date, --begin-date/--end-date, --from-file, --today-filings, or --fetch-all-docket-metadata",
+      );
     }
   }
 
-  // Extract gov IDs from cases if we have partial dockets
-  if (casesToScrape.length > 0) {
-    govIds = casesToScrape
-      .map((c) => c.case_govid)
-      .filter(
-        (id): id is string => typeof id === "string" && id.trim().length > 0,
-      );
-  }
-
-  if (govIds.length === 0 && options.mode != ScrapingMode.IDS_ONLY) {
+  if (casesToScrape.length === 0) {
     throw new Error("No cases found to scrape");
   }
 
   // Now scrape the cases with the specified mode
-  console.error(`Scraping ${govIds.length} cases in ${options.mode} mode`);
-  const results = await scraper.scrapeByGovIds(govIds, options.mode);
+  console.error(
+    `Scraping ${casesToScrape.length} cases in ${options.mode} mode`,
+  );
+  const results = await scraper.scrapeByGovIds(casesToScrape, options.mode);
 
   console.error(`Scraped ${results.length} results in ${options.mode} mode`);
 
@@ -2056,7 +1947,7 @@ async function main() {
     if (!customOptions) {
       console.error("Error: No scraping arguments provided. Exiting.");
       console.error(
-        "Please provide arguments to run the scraper, e.g. --mode full-all-missing",
+        "Please provide arguments to run the scraper, e.g. --mode ids_only --fetch-all-docket-metadata",
       );
       process.exit(1);
     }

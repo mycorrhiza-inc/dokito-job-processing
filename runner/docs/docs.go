@@ -9,7 +9,16 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {},
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://www.swagger.io/support",
+            "email": "support@swagger.io"
+        },
+        "license": {
+            "name": "MIT",
+            "url": "https://opensource.org/licenses/MIT"
+        },
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -32,7 +41,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.HealthResponse"
+                            "$ref": "#/definitions/api.HealthResponse"
                         }
                     },
                     "405": {
@@ -42,6 +51,122 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pipeline/async": {
+            "post": {
+                "description": "Queue a pipeline task for background processing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipeline"
+                ],
+                "summary": "Execute async pipeline",
+                "parameters": [
+                    {
+                        "description": "Async pipeline request with government ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncPipelineRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncPipelineResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncPipelineResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/pipeline/bulk-queue": {
+            "post": {
+                "description": "Find missing govids, randomize them, and queue a limited number for background processing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "pipeline"
+                ],
+                "summary": "Bulk queue missing govids",
+                "parameters": [
+                    {
+                        "description": "Bulk queue request with optional limit and intermediate source",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.BulkQueueRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.BulkQueueResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.BulkQueueResponse"
                         }
                     }
                 }
@@ -67,7 +192,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/main.FullPipelineRequest"
+                            "$ref": "#/definitions/api.FullPipelineRequest"
                         }
                     }
                 ],
@@ -75,7 +200,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/main.FullPipelineResponse"
+                            "$ref": "#/definitions/api.FullPipelineResponse"
                         }
                     },
                     "400": {
@@ -99,7 +224,27 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/main.FullPipelineResponse"
+                            "$ref": "#/definitions/api.FullPipelineResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/queue/status": {
+            "get": {
+                "description": "Get the current status of the background task queues",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "queue"
+                ],
+                "summary": "Get queue status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.QueueStatusResponse"
                         }
                     }
                 }
@@ -107,15 +252,92 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "main.FullPipelineRequest": {
+        "api.AsyncPipelineRequest": {
             "type": "object",
             "properties": {
                 "gov_id": {
                     "type": "string"
+                },
+                "intermediate_source": {
+                    "$ref": "#/definitions/pipelines.IntermediateSource"
                 }
             }
         },
-        "main.FullPipelineResponse": {
+        "api.AsyncPipelineResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "gov_id": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "api.BulkQueueRequest": {
+            "type": "object",
+            "properties": {
+                "intermediate_source": {
+                    "$ref": "#/definitions/pipelines.IntermediateSource"
+                },
+                "limit": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.BulkQueueResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "queued": {
+                    "type": "integer"
+                },
+                "queued_gov_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "total_missing": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.FullPipelineRequest": {
+            "type": "object",
+            "properties": {
+                "gov_id": {
+                    "type": "string"
+                },
+                "intermediate_source": {
+                    "$ref": "#/definitions/pipelines.IntermediateSource"
+                }
+            }
+        },
+        "api.FullPipelineResponse": {
             "type": "object",
             "properties": {
                 "error": {
@@ -141,7 +363,7 @@ const docTemplate = `{
                 }
             }
         },
-        "main.HealthResponse": {
+        "api.HealthResponse": {
             "type": "object",
             "properties": {
                 "services": {
@@ -157,18 +379,54 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "api.QueueStatusResponse": {
+            "type": "object",
+            "properties": {
+                "queue_stats": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
+        },
+        "pipelines.IntermediateSource": {
+            "type": "string",
+            "enum": [
+                "none",
+                "html",
+                "raw_json",
+                "processed_json"
+            ],
+            "x-enum-comments": {
+                "IntermediateSourceHTML": "Retrieve from HTML snapshots in S3/local storage",
+                "IntermediateSourceNone": "No intermediate source, run full scraping",
+                "IntermediateSourceProcessedJSON": "Retrieve from processed JSON objects storage",
+                "IntermediateSourceRawJSON": "Retrieve from raw JSON objects storage"
+            },
+            "x-enum-descriptions": [
+                "No intermediate source, run full scraping",
+                "Retrieve from HTML snapshots in S3/local storage",
+                "Retrieve from raw JSON objects storage",
+                "Retrieve from processed JSON objects storage"
+            ],
+            "x-enum-varnames": [
+                "IntermediateSourceNone",
+                "IntermediateSourceHTML",
+                "IntermediateSourceRawJSON",
+                "IntermediateSourceProcessedJSON"
+            ]
         }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
-	Host:             "",
-	BasePath:         "",
-	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Version:          "1.0",
+	Host:             "localhost:8080",
+	BasePath:         "/",
+	Schemes:          []string{"http", "https"},
+	Title:            "Dokito Job Processing API",
+	Description:      "API for managing data scraping, processing, and upload pipelines for government documents",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

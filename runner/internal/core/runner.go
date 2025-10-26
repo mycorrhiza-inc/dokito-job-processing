@@ -27,6 +27,7 @@ type DokitoBinaryPaths struct {
 	ProcessDocketsPath      string
 	UploadDocketsPath       string
 	DownloadAttachmentsPath string
+	DatabaseUtilsPath       string
 }
 
 func GetDokitoPaths() DokitoBinaryPaths {
@@ -34,6 +35,7 @@ func GetDokitoPaths() DokitoBinaryPaths {
 		ProcessDocketsPath:      os.Getenv("DOKITO_PROCESS_DOCKETS_BINARY_PATH"),
 		UploadDocketsPath:       os.Getenv("DOKITO_UPLOAD_DOCKETS_BINARY_PATH"),
 		DownloadAttachmentsPath: os.Getenv("DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"),
+		DatabaseUtilsPath:       os.Getenv("DOKITO_DATABASE_UTILS_BINARY_PATH"),
 	}
 }
 
