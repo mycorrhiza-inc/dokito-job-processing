@@ -120,11 +120,16 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
                     if let Some(real_original_date) = original_date {
                         warn!(docket_opened_date =%real_original_date, oldest_date_found=%filing_date,"Found filing with date older then the docket opened date");
                     };
-                };
+                } else if min_date.is_none() {
+                    // If we don't have an opened_date yet, use the first filing date we find
+                    min_date = Some(filing_date);
+                }
             }
-            // This should almost never happen, because the chances of corruption happening on the
-            // docket date, and all the filing dates are very small.
-            min_date.unwrap_or(NaiveDate::MAX)
+            // If we still don't have a date, use a reasonable default instead of MAX
+            min_date.unwrap_or_else(|| {
+                warn!("No opened_date or filing dates found, using current date as fallback");
+                chrono::Utc::now().date_naive()
+            })
         };
         let cached_filings = cached.map(|d| d.filings);
         let matched_filings = match_raw_filings_to_processed_filings(input.filings, cached_filings);
