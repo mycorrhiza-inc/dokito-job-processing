@@ -18,108 +18,13 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"strconv"
-	"syscall"
-	"time"
 
-	"runner/internal"
-	"runner/internal/api"
-	"runner/internal/worker"
+	"runner/internal/cli"
 )
 
 func main() {
-	// Parse command line arguments for server mode
-	port := 8080
-	debugMode := false
-
-	if len(os.Args) > 1 {
-		if p, err := strconv.Atoi(os.Args[1]); err == nil {
-			port = p
-		}
-	}
-
-	// Check for flags
-	for i, arg := range os.Args {
-		if arg == "-port" && i+1 < len(os.Args) {
-			if p, err := strconv.Atoi(os.Args[i+1]); err == nil {
-				port = p
-			}
-		} else if arg == "--debug" {
-			debugMode = true
-		}
-	}
-
-	log.Printf("🚀 Starting Dokito Job Processing Server on port %d (debug: %t)", port, debugMode)
-
-	// Set global debug mode for worker tasks
-	worker.SetGlobalDebugMode(debugMode)
-
-	// Initialize background task queues
-	log.Printf("🔧 Initializing task queues...")
-	if err := worker.InitializeQueues(); err != nil {
-		log.Printf("⚠️  Failed to initialize task queues: %v", err)
-		log.Printf("   Server will continue without background processing")
-	} else {
-		// Register task handlers
-		worker.RegisterTasks()
-
-		// Start background workers
-		ctx := context.Background()
-		if err := worker.StartWorkers(ctx); err != nil {
-			log.Printf("⚠️  Failed to start background workers: %v", err)
-		}
-	}
-
-	// Setup routes
-	mux := api.SetupRoutes()
-
-	// Apply middleware
-	handler := internal.LoggingMiddleware(internal.CorsMiddleware(mux))
-
-	// Start server
-	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: handler,
-	}
-
-	// Setup graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		sig := <-sigChan
-		log.Printf("🛑 Received signal %s, shutting down gracefully...", sig)
-
-		// Stop background workers
-		if err := worker.StopWorkers(); err != nil {
-			log.Printf("⚠️  Error stopping workers: %v", err)
-		}
-
-		// Shutdown HTTP server
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("❌ Server shutdown error: %v", err)
-		}
-	}()
-
-	log.Printf("✅ Server ready at http://localhost:%d", port)
-	log.Printf("📋 Health check: http://localhost:%d/api/health", port)
-	log.Printf("🎯 Full pipeline: POST http://localhost:%d/api/pipeline/full", port)
-	log.Printf("⚡ Async pipeline: POST http://localhost:%d/api/pipeline/async", port)
-	log.Printf("📦 Bulk queue: POST http://localhost:%d/api/pipeline/bulk-queue", port)
-	log.Printf("📊 Queue status: GET http://localhost:%d/api/queue/status", port)
-
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("❌ Server failed to start: %v", err)
-	}
-
-	log.Printf("✅ Server shutdown complete")
+	// Force server command to run
+	os.Args = append([]string{os.Args[0], "server"}, os.Args[1:]...)
+	cli.Execute()
 }
