@@ -29,6 +29,7 @@ use crate::types::processed::{
     ProcessedGenericAttachment, ProcessedGenericDocket, ProcessedGenericFiling,
 };
 use crate::types::raw::{RawGenericAttachment, RawGenericDocket, RawGenericFiling};
+use crate::indexes::attachment_url_index::lookup_hash_from_url;
 
 impl Revalidate for ProcessedGenericDocket {
     async fn revalidate(&mut self) -> RevalidationOutcome {
@@ -474,7 +475,26 @@ impl ProcessFrom<RawGenericAttachment> for ProcessedGenericAttachment {
             .as_ref()
             .map(|val| val.object_uuid)
             .unwrap_or_else(Uuid::new_v4);
-        let hash = (input.hash).or_else(|| cached.and_then(|v| v.hash));
+
+        // Try to get hash from: 1) input, 2) cached, 3) URL cache
+        let hash = (input.hash)
+            .or_else(|| cached.and_then(|v| v.hash));
+
+        let hash = if hash.is_none() && !input.url.is_empty() {
+            // Check URL cache for existing hash
+            if let Some(cached_attach) = lookup_hash_from_url(&input.url).await {
+                tracing::debug!(
+                    hash=%cached_attach.hash,
+                    url=%input.url,
+                    "Found cached hash for attachment URL during processing"
+                );
+                Some(cached_attach.hash)
+            } else {
+                None
+            }
+        } else {
+            hash
+        };
         let return_res = Self {
             object_uuid: uuid,
             index_in_filing: index_data.index,
