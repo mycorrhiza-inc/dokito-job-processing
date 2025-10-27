@@ -75,8 +75,8 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
             data: file_contents,
             filename: server_filename,
         } = download_file_content_validated_with_retries(&self.url, extension).await?;
-        let download_finish_instant = Instant::now();
-        let download_time_seconds = (download_start - download_finish_instant).as_secs_f64();
+        let download_time_seconds = Instant::now().duration_since(download_start).as_secs_f64();
+        let upload_start = Instant::now();
         let hash = Blake2bHash::from_bytes(&file_contents);
         debug!(%hash, url=%self.url,"Successfully downloaded file.");
 
@@ -107,8 +107,7 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         if let Err(err) = update_pg_result {
             warn!(%err,url =%self.url, %hash,"Updating the attachment hash in postgres encountered an error.")
         };
-        let upload_finish_instant = Instant::now();
-        let upload_time_seconds = (download_finish_instant - upload_finish_instant).as_secs_f64();
+        let upload_time_seconds = Instant::now().duration_since(upload_start).as_secs_f64();
         info!(%hash, url = %self.url, %download_time_seconds,%upload_time_seconds,"Successfully downloaded attachment and saved everything to s3.");
         Ok(RevalidationOutcome::DidChange)
     }
