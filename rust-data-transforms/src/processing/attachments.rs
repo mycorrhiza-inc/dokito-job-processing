@@ -52,9 +52,18 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         }
         let name = NonEmptyString::from_str(&self.name)
             .unwrap_or_else(|_| non_empty_string!("unknown_filename"));
+
+        let pool = get_dokito_pool().await?;
         let res = lookup_hash_from_url(&self.url).await;
         if let Some(cached_attach) = res {
             self.hash = Some(cached_attach.hash);
+            let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
+                self,
+                extra_data.fixed_jurisdiction,
+                pool,
+            )
+            .await?;
+
             return Ok(RevalidationOutcome::DidChange);
         };
         debug!(url=%self.url,"Trying to download attachment file.");
@@ -85,7 +94,6 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         };
         shipout_attachment_to_s3(file_contents, raw_attachment, &extra_data.s3_client).await?;
         self.hash = Some(hash);
-        let pool = get_dokito_pool().await?;
         let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
             self,
             extra_data.fixed_jurisdiction,
