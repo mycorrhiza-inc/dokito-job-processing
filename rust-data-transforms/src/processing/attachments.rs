@@ -263,7 +263,7 @@ async fn download_file_content_validated_with_retries<T: InternetFileFetch + ?Si
     let mut last_error: Option<FileDownloadError> = None;
     for _ in 0..ATTACHMENT_DOWNLOAD_TRIES {
         match to_fetch
-            .download_file_with_timeout(Duration::from_secs(20))
+            .download_file_with_timeout(Duration::from_secs(60))
             .await
         {
             Ok(file_contents) => {

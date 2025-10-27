@@ -49,7 +49,7 @@ impl FileDownloadError {
     }
 }
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(40);
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(80);
 pub trait InternetFileFetch: Debug {
     // New methods that return filename along with data
     async fn download_file_with_timeout(
