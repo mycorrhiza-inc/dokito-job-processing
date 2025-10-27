@@ -171,7 +171,7 @@ pub async fn push_raw_attach_file_to_s3(
     raw_att: &RawAttachment,
     file_contents: Vec<u8>,
 ) -> anyhow::Result<()> {
-    info!(hash = %raw_att.hash, "Pushing raw attachment file to S3");
+    debug!(hash = %raw_att.hash, "Pushing raw attachment file to S3");
     let file_key = get_raw_attach_file_key(raw_att.hash);
 
     S3Addr::new(s3_client, &OPENSCRAPERS_S3_OBJECT_BUCKET, &file_key)

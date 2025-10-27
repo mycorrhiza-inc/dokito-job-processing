@@ -20,10 +20,10 @@ use sqlx::prelude::FromRow;
 use sqlx::{PgPool, query_as, query_scalar};
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use super::file_fetching::{AdvancedFetchData, FileDownloadResult, InternetFileFetch};
@@ -69,10 +69,14 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         debug!(url=%self.url,"Trying to download attachment file.");
         let extension = &self.document_extension;
 
+        let download_start = Instant::now();
+
         let FileDownloadResult {
             data: file_contents,
             filename: server_filename,
         } = download_file_content_validated_with_retries(&self.url, extension).await?;
+        let download_finish_instant = Instant::now();
+        let download_time_seconds = (download_start - download_finish_instant).as_secs();
         let hash = Blake2bHash::from_bytes(&file_contents);
         debug!(%hash, url=%self.url,"Successfully downloaded file.");
 
@@ -94,13 +98,18 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         };
         shipout_attachment_to_s3(file_contents, raw_attachment, &extra_data.s3_client).await?;
         self.hash = Some(hash);
-        let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
+        let update_pg_result = attempt_to_update_hash_of_postgres_attachment(
             self,
             extra_data.fixed_jurisdiction,
             pool,
         )
-        .await?;
-        debug!(%hash, url = %self.url,"Successfully downloaded attachment and saved everything to s3.");
+        .await;
+        if let Err(err) = update_pg_result {
+            warn!(%err,url =%self.url, %hash,"Updating the attachment hash in postgres encountered an error.")
+        };
+        let upload_finish_instant = Instant::now();
+        let upload_time_seconds = (download_finish_instant - upload_finish_instant).as_secs();
+        info!(%hash, url = %self.url, %download_time_seconds,%upload_time_seconds,"Successfully downloaded attachment and saved everything to s3.");
         Ok(RevalidationOutcome::DidChange)
     }
 }
