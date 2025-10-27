@@ -1,5 +1,37 @@
 basePath: /
 definitions:
+  api.AsyncDownloadAttachmentsRequest:
+    properties:
+      debug_mode:
+        type: boolean
+      gov_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  api.AsyncDownloadAttachmentsResponse:
+    properties:
+      error:
+        type: string
+      errors:
+        items:
+          type: string
+        type: array
+      gov_ids:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+      queued:
+        type: integer
+      request_ids:
+        items:
+          type: string
+        type: array
+      success:
+        type: boolean
+    type: object
   api.AsyncPipelineRequest:
     properties:
       debug_mode:
@@ -126,6 +158,45 @@ info:
   title: Dokito Job Processing API
   version: "1.0"
 paths:
+  /api/attachments/async:
+    post:
+      consumes:
+      - application/json
+      description: Queue download attachments tasks for multiple government IDs for
+        background processing
+      parameters:
+      - description: Async download attachments request with list of government IDs
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.AsyncDownloadAttachmentsRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/api.AsyncDownloadAttachmentsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "405":
+          description: Method Not Allowed
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.AsyncDownloadAttachmentsResponse'
+      summary: Execute async download attachments for multiple IDs
+      tags:
+      - attachments
   /api/health:
     get:
       consumes:

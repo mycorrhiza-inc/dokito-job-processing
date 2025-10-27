@@ -48,6 +48,21 @@ type QueueClearResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
+type AsyncDownloadAttachmentsRequest struct {
+	GovIDs    []string `json:"gov_ids"`
+	DebugMode bool     `json:"debug_mode,omitempty"`
+}
+
+type AsyncDownloadAttachmentsResponse struct {
+	Success    bool     `json:"success"`
+	RequestIDs []string `json:"request_ids"`
+	GovIDs     []string `json:"gov_ids"`
+	Queued     int      `json:"queued"`
+	Errors     []string `json:"errors,omitempty"`
+	Message    string   `json:"message"`
+	Error      string   `json:"error,omitempty"`
+}
+
 type BulkQueueRequest struct {
 	Limit              int                           `json:"limit,omitempty"`
 	IntermediateSource pipelines.IntermediateSource `json:"intermediate_source,omitempty"`
@@ -358,5 +373,74 @@ func HandleBulkQueue(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("✅ [Bulk Queue API] Operation completed: %d queued", result.Queued)
 	writeJSON(w, http.StatusOK, response)
+}
+
+// @Summary Execute async download attachments for multiple IDs
+// @Description Queue download attachments tasks for multiple government IDs for background processing
+// @Tags attachments
+// @Accept json
+// @Produce json
+// @Param request body AsyncDownloadAttachmentsRequest true "Async download attachments request with list of government IDs"
+// @Success 202 {object} AsyncDownloadAttachmentsResponse
+// @Failure 400 {object} map[string]string
+// @Failure 405 {object} map[string]string
+// @Failure 500 {object} AsyncDownloadAttachmentsResponse
+// @Router /api/attachments/async [post]
+func HandleAsyncDownloadAttachments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	var req AsyncDownloadAttachmentsRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid JSON: %v", err))
+		return
+	}
+
+	if len(req.GovIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "gov_ids array is required and cannot be empty")
+		return
+	}
+
+	// Create execution context (disable debug mode for API requests unless explicitly requested)
+	var config *core.ExecutionConfig
+	if req.DebugMode {
+		config = core.NewExecutionConfigWithDebug()
+	} else {
+		config = core.NewExecutionConfig()
+	}
+	ctx := core.WithExecutionConfig(context.Background(), config)
+
+	// Use the bulk enqueue function
+	result, err := worker.BulkEnqueueDownloadAttachmentsTasks(ctx, req.GovIDs)
+
+	response := AsyncDownloadAttachmentsResponse{}
+
+	if err != nil {
+		response.Success = false
+		response.Error = err.Error()
+		log.Printf("❌ [Download Attachments API] Operation failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, response)
+		return
+	}
+
+	// Map the worker result to API response
+	response.Success = true
+	response.RequestIDs = result.RequestIDs
+	response.GovIDs = result.QueuedGovIds
+	response.Queued = result.Queued
+	response.Errors = result.Errors
+	response.Message = result.Message
+
+	log.Printf("✅ [Download Attachments API] Operation completed: %d queued", result.Queued)
+	writeJSON(w, http.StatusAccepted, response)
 }
 

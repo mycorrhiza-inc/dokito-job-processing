@@ -21,6 +21,64 @@
     },
     "basePath": "/",
     "paths": {
+        "/api/attachments/async": {
+            "post": {
+                "description": "Queue download attachments tasks for multiple government IDs for background processing",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "attachments"
+                ],
+                "summary": "Execute async download attachments for multiple IDs",
+                "parameters": [
+                    {
+                        "description": "Async download attachments request with list of government IDs",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncDownloadAttachmentsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncDownloadAttachmentsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method Not Allowed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.AsyncDownloadAttachmentsResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/health": {
             "get": {
                 "description": "Get the health status of the API and all configured services",
@@ -226,6 +284,55 @@
         }
     },
     "definitions": {
+        "api.AsyncDownloadAttachmentsRequest": {
+            "type": "object",
+            "properties": {
+                "debug_mode": {
+                    "type": "boolean"
+                },
+                "gov_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "api.AsyncDownloadAttachmentsResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "gov_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "queued": {
+                    "type": "integer"
+                },
+                "request_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "api.AsyncPipelineRequest": {
             "type": "object",
             "properties": {

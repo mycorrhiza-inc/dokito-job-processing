@@ -36,9 +36,32 @@ type PipelineTaskResult struct {
 	CompletedAt  time.Time                       `json:"completed_at"`
 }
 
+// DownloadAttachmentsTaskRequest represents the parameters for a download attachments task
+type DownloadAttachmentsTaskRequest struct {
+	GovID     string    `json:"gov_id"`
+	RequestID string    `json:"request_id,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	DebugMode bool      `json:"debug_mode,omitempty"`
+}
+
+// DownloadAttachmentsTaskResult represents the result of a download attachments task
+type DownloadAttachmentsTaskResult struct {
+	Success         bool          `json:"success"`
+	GovID           string        `json:"gov_id"`
+	DataChanged     bool          `json:"data_changed"`
+	UploadPerformed bool          `json:"upload_performed"`
+	Message         string        `json:"message"`
+	Error           string        `json:"error,omitempty"`
+	Duration        time.Duration `json:"duration"`
+	RequestID       string        `json:"request_id,omitempty"`
+	CompletedAt     time.Time     `json:"completed_at"`
+}
+
 const (
 	// TypePipelineTask is the task type for processing pipelines
 	TypePipelineTask = "process_pipeline"
+	// TypeDownloadAttachmentsTask is the task type for reprocessing attachments
+	TypeDownloadAttachmentsTask = "download_missing_attachments"
 )
 
 // RegisterTasks registers all task handlers with the queue system
@@ -46,7 +69,10 @@ func RegisterTasks() {
 	// Register the pipeline processing handler
 	ServeMux.HandleFunc(TypePipelineTask, processPipelineHandler)
 
-	log.Printf("📝 Registered pipeline processing task with asynq")
+	// Register the download attachments processing handler
+	ServeMux.HandleFunc(TypeDownloadAttachmentsTask, processDownloadAttachmentsHandler)
+
+	log.Printf("📝 Registered pipeline processing and download attachments tasks with asynq")
 }
 
 // processPipelineHandler is the actual handler function that processes pipeline tasks
@@ -363,4 +389,212 @@ type BulkQueueResult struct {
 	QueuedGovIds []string `json:"queued_gov_ids"`
 	Errors       []string `json:"errors,omitempty"`
 	Message      string   `json:"message"`
+}
+
+// processDownloadAttachmentsHandler is the handler function that processes download attachments tasks
+func processDownloadAttachmentsHandler(ctx context.Context, t *asynq.Task) error {
+	// Parse the task payload
+	var req DownloadAttachmentsTaskRequest
+	if err := json.Unmarshal(t.Payload(), &req); err != nil {
+		return fmt.Errorf("failed to unmarshal download attachments task payload: %w", err)
+	}
+
+	startTime := time.Now()
+
+	log.Printf("📥 [Worker] Starting attachment reprocessing for GovID: %s (RequestID: %s)",
+		req.GovID, req.RequestID)
+
+	// Create execution context with debug mode
+	var execConfig *core.ExecutionConfig
+	if req.DebugMode || GlobalDebugMode {
+		execConfig = core.NewExecutionConfigWithDebug()
+	} else {
+		execConfig = core.NewExecutionConfig()
+	}
+	execCtx := core.WithExecutionConfig(ctx, execConfig)
+
+	// Execute the attachment reprocessing pipeline
+	result, err := pipelines.ExecuteAttachmentReprocessingPipelineWithConfig(execCtx, req.GovID)
+
+	duration := time.Since(startTime)
+
+	if err != nil {
+		log.Printf("❌ [Worker] Attachment reprocessing failed for GovID %s: %v (Duration: %v)",
+			req.GovID, err, duration)
+
+		// Store the failed result
+		failedResult := DownloadAttachmentsTaskResult{
+			Success:     false,
+			GovID:       req.GovID,
+			Error:       err.Error(),
+			Duration:    duration,
+			RequestID:   req.RequestID,
+			CompletedAt: time.Now(),
+		}
+
+		// Store result in Redis for later retrieval (optional)
+		storeDownloadAttachmentsTaskResult(req.RequestID, failedResult)
+
+		return fmt.Errorf("attachment reprocessing failed: %w", err)
+	}
+
+	// Create successful result
+	successResult := DownloadAttachmentsTaskResult{
+		Success:         true,
+		GovID:           result.GovID,
+		DataChanged:     result.DataChanged,
+		UploadPerformed: result.UploadPerformed,
+		Message: fmt.Sprintf("Attachment reprocessing completed for %s. Data changed: %t, Upload performed: %t",
+			result.GovID, result.DataChanged, result.UploadPerformed),
+		Duration:    duration,
+		RequestID:   req.RequestID,
+		CompletedAt: time.Now(),
+	}
+
+	// Store the successful result
+	storeDownloadAttachmentsTaskResult(req.RequestID, successResult)
+
+	if result.DataChanged {
+		log.Printf("✅ [Worker] Attachment reprocessing completed for GovID %s in %v - DATA CHANGED and uploaded",
+			req.GovID, duration)
+	} else {
+		log.Printf("✅ [Worker] Attachment reprocessing completed for GovID %s in %v - NO CHANGES detected",
+			req.GovID, duration)
+	}
+
+	return nil
+}
+
+// EnqueueDownloadAttachmentsTask adds a new download attachments task to the queue
+func EnqueueDownloadAttachmentsTask(ctx context.Context, govID string) (string, error) {
+	if Client == nil {
+		return "", ErrQueueNotInitialized
+	}
+
+	// Generate a unique request ID for tracking
+	requestID := fmt.Sprintf("download_attachments_%s_%d", govID, time.Now().Unix())
+
+	// Get debug mode from execution context
+	config := core.GetExecutionConfig(ctx)
+
+	req := DownloadAttachmentsTaskRequest{
+		GovID:     govID,
+		RequestID: requestID,
+		Timestamp: time.Now(),
+		DebugMode: config.DebugMode,
+	}
+
+	// Marshal the request to JSON
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal download attachments task payload: %w", err)
+	}
+
+	// Create asynq task
+	task := asynq.NewTask(TypeDownloadAttachmentsTask, payload, asynq.MaxRetry(3))
+
+	// Enqueue the task
+	info, err := Client.Enqueue(task)
+	if err != nil {
+		return "", fmt.Errorf("failed to enqueue download attachments task: %w", err)
+	}
+
+	log.Printf("📋 [Queue] Enqueued download attachments task for GovID: %s (RequestID: %s, TaskID: %s)",
+		govID, requestID, info.ID)
+	return requestID, nil
+}
+
+// BulkEnqueueDownloadAttachmentsTasks queues multiple docket IDs for attachment reprocessing
+func BulkEnqueueDownloadAttachmentsTasks(ctx context.Context, govIDs []string) (*BulkDownloadAttachmentsResult, error) {
+	if Client == nil {
+		return nil, ErrQueueNotInitialized
+	}
+
+	log.Printf("📤 [Bulk Queue] Queueing %d download attachments tasks...", len(govIDs))
+
+	var queuedGovIds []string
+	var requestIDs []string
+	var queueErrors []string
+
+	for i, govID := range govIDs {
+		requestID, err := EnqueueDownloadAttachmentsTask(ctx, govID)
+		if err != nil {
+			log.Printf("⚠️  [Bulk Queue] Failed to queue download attachments for %s: %v", govID, err)
+			queueErrors = append(queueErrors, fmt.Sprintf("%s: %v", govID, err))
+			continue
+		}
+
+		queuedGovIds = append(queuedGovIds, govID)
+		requestIDs = append(requestIDs, requestID)
+
+		// Log progress every 100 items
+		if (i+1)%100 == 0 {
+			log.Printf("📊 [Bulk Queue] Download attachments progress: %d/%d queued", i+1, len(govIDs))
+		}
+	}
+
+	result := &BulkDownloadAttachmentsResult{
+		Queued:       len(queuedGovIds),
+		QueuedGovIds: queuedGovIds,
+		RequestIDs:   requestIDs,
+		Errors:       queueErrors,
+	}
+
+	if len(queueErrors) > 0 {
+		result.Message = fmt.Sprintf("Queued %d out of %d download attachments tasks. %d errors occurred.",
+			len(queuedGovIds), len(govIDs), len(queueErrors))
+	} else {
+		result.Message = fmt.Sprintf("Successfully queued %d download attachments tasks.", len(queuedGovIds))
+	}
+
+	log.Printf("✅ [Bulk Queue] Download attachments completed: %d queued, %d errors", len(queuedGovIds), len(queueErrors))
+	return result, nil
+}
+
+// BulkDownloadAttachmentsResult represents the result of a bulk download attachments queueing operation
+type BulkDownloadAttachmentsResult struct {
+	Queued       int      `json:"queued"`
+	QueuedGovIds []string `json:"queued_gov_ids"`
+	RequestIDs   []string `json:"request_ids"`
+	Errors       []string `json:"errors,omitempty"`
+	Message      string   `json:"message"`
+}
+
+// storeDownloadAttachmentsTaskResult stores the download attachments task result
+func storeDownloadAttachmentsTaskResult(requestID string, result DownloadAttachmentsTaskResult) {
+	if requestID == "" {
+		return
+	}
+
+	// This is a simple implementation - in production you might want to use a more robust storage
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		log.Printf("⚠️  Failed to marshal download attachments task result: %v", err)
+		return
+	}
+
+	// Store in Redis with a TTL of 24 hours
+	ctx := context.Background()
+	key := fmt.Sprintf("download_attachments_result:%s", requestID)
+
+	// For now, just log that we would store it
+	log.Printf("📦 [Storage] Would store download attachments result for RequestID: %s (Success: %t, DataChanged: %t)",
+		requestID, result.Success, result.DataChanged)
+
+	// TODO: Implement actual Redis storage
+	_ = resultJSON
+	_ = ctx
+	_ = key
+}
+
+// GetDownloadAttachmentsTaskResult retrieves a download attachments task result by request ID
+func GetDownloadAttachmentsTaskResult(requestID string) (*DownloadAttachmentsTaskResult, error) {
+	if requestID == "" {
+		return nil, fmt.Errorf("request ID is required")
+	}
+
+	// TODO: Implement Redis retrieval
+	log.Printf("🔍 [Storage] Would retrieve download attachments result for RequestID: %s", requestID)
+
+	return nil, fmt.Errorf("download attachments task result retrieval not yet implemented")
 }

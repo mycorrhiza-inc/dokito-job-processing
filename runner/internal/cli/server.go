@@ -110,6 +110,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	log.Printf("🎯 Full pipeline: POST http://localhost:%d/api/pipeline/full", serverPort)
 	log.Printf("⚡ Async pipeline: POST http://localhost:%d/api/pipeline/async", serverPort)
 	log.Printf("📦 Bulk queue: POST http://localhost:%d/api/pipeline/bulk-queue", serverPort)
+	log.Printf("📥 Async download attachments: POST http://localhost:%d/api/attachments/async", serverPort)
 	log.Printf("📊 Queue status: GET http://localhost:%d/api/queue/status", serverPort)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
