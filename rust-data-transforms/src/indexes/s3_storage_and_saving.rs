@@ -90,7 +90,7 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
     info!(hashlist_length = %hashlist.len(),"Got all hashes from directory.");
 
     // Limit concurrency to 20
-    let semaphore = Arc::new(Semaphore::new(30));
+    let semaphore = Arc::new(Semaphore::new(40));
     let mut handles = Vec::with_capacity(hashlist.len());
 
     for hash in hashlist {

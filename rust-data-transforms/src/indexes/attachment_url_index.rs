@@ -93,7 +93,7 @@ async fn get_cached_attachment(url: &str) -> Option<RawAttachment> {
 }
 
 /// Cache attachment data in Redis
-async fn cache_attachment(url: &str, attachment: &RawAttachment) -> Result<()> {
+pub async fn cache_attachment(url: &str, attachment: &RawAttachment) -> Result<()> {
     let mut conn = match get_redis_connection().await {
         Some(conn) => conn,
         None => return Ok(()), // Gracefully handle Redis unavailability

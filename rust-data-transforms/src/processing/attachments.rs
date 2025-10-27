@@ -1,5 +1,5 @@
 use crate::data_processing_traits::{DownloadIncomplete, RevalidationOutcome};
-use crate::indexes::attachment_url_index::lookup_hash_from_url;
+use crate::indexes::attachment_url_index::{lookup_hash_from_url, cache_attachment};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::file_fetching::{FileDownloadError, RequestMethod};
 use crate::s3_stuff::{
@@ -96,7 +96,7 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
             date_updated: Utc::now(),
             extra_metadata: metadata,
         };
-        shipout_attachment_to_s3(file_contents, raw_attachment, &extra_data.s3_client).await?;
+        let final_raw_attachment = shipout_attachment_to_s3(file_contents, raw_attachment, &extra_data.s3_client).await?;
         self.hash = Some(hash);
         let update_pg_result = attempt_to_update_hash_of_postgres_attachment(
             self,
@@ -107,6 +107,11 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         if let Err(err) = update_pg_result {
             warn!(%err,url =%self.url, %hash,"Updating the attachment hash in postgres encountered an error.")
         };
+
+        // Cache the attachment in Redis for future lookups
+        if let Err(err) = cache_attachment(&self.url, &final_raw_attachment).await {
+            warn!(%err, url = %self.url, %hash, "Failed to cache attachment in Redis");
+        }
         let upload_time_seconds = Instant::now().duration_since(upload_start).as_secs_f64();
         info!(%hash, url = %self.url, %download_time_seconds,%upload_time_seconds,"Successfully downloaded attachment and saved everything to s3.");
         Ok(RevalidationOutcome::DidChange)
