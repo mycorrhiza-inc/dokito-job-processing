@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::Path, str::FromStr, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Instant};
+use std::{collections::BTreeMap, path::Path, str::FromStr, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
 
 use crate::types::{
     attachments::RawAttachment,
@@ -82,8 +82,6 @@ pub async fn pull_index_from_s3() -> AttachIndex {
 //         .collect();
 //     Ok(map)
 // }
-
-use tokio::sync::Semaphore;
 
 pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
     info!("Starting attachment index generation");
