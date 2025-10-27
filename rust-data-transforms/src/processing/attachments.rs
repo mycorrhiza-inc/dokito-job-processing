@@ -138,7 +138,7 @@ async fn attempt_to_update_hash_of_postgres_attachment(
         let downloaded_hash = &*record.file_hash_if_downloaded;
         if downloaded_hash != hash_string {
             let _res = sqlx::query(&format!(
-                "UPDATE {pg_schema}.attachments SET file_hash_if_downloaded=$1 WHERE uuid=$2"
+                "UPDATE {pg_schema}.attachments SET file_hash_if_downloaded=$1, updated_at=NOW() WHERE uuid=$2"
             ))
             .bind(&hash_string)
             .bind(attach_uuid_guess)
