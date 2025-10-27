@@ -47,11 +47,11 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         &mut self,
         extra_data: Self::ExtraData,
     ) -> anyhow::Result<RevalidationOutcome> {
-        let name = NonEmptyString::from_str(&self.name)
-            .unwrap_or_else(|_| non_empty_string!("unknown_filename"));
         if self.hash.is_some() {
             return Ok(RevalidationOutcome::NoChanges);
         }
+        let name = NonEmptyString::from_str(&self.name)
+            .unwrap_or_else(|_| non_empty_string!("unknown_filename"));
         let res = lookup_hash_from_url(&self.url).await;
         if let Some(cached_attach) = res {
             self.hash = Some(cached_attach.hash);

@@ -65,3 +65,31 @@ func ExecuteUploadBinary(ctx context.Context, data []map[string]any) error {
 	return nil
 }
 
+func ExecuteDownloadAttachmentsBinary(ctx context.Context, data []map[string]any) ([]map[string]any, error) {
+	config := GetExecutionConfig(ctx)
+	if config.DokitoPaths.DownloadAttachmentsPath == "" {
+		return nil, fmt.Errorf("download attachments binary path not configured")
+	}
+
+	inputJSON, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal input data: %v", err)
+	}
+
+	// Create debug-aware command
+	cmd := CommandContext(ctx, "📥 [Download Attachments]", config.DokitoPaths.DownloadAttachmentsPath, "--fixed-jur", "new_york_puc")
+	cmd.Stdin = strings.NewReader(string(inputJSON))
+
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("download attachments failed: %v", err)
+	}
+
+	var results []map[string]any
+	if err := json.Unmarshal(output, &results); err != nil {
+		return nil, fmt.Errorf("failed to parse download attachments output as JSON: %v", err)
+	}
+
+	return results, nil
+}
+
