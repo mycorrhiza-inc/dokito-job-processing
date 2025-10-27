@@ -1,9 +1,18 @@
-use std::{collections::BTreeMap, path::Path, str::FromStr, sync::{Arc, atomic::{AtomicUsize, Ordering}}};
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use crate::types::{
     attachments::RawAttachment,
     env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET},
 };
+use crate::utils::progress_reporter::{log_completion_stats, start_progress_reporter};
 use aws_sdk_s3::Client;
 use mycorrhiza_common::{
     hash::Blake2bHash,
@@ -14,9 +23,8 @@ use mycorrhiza_common::{
     },
 };
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
 use tokio::sync::Semaphore;
-use crate::utils::progress_reporter::{start_progress_reporter, log_completion_stats};
+use tracing::{debug, info, warn};
 
 use crate::indexes::attachment_url_index::AttachIndex;
 
@@ -124,8 +132,8 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
         "attachment_index_generation".to_string(),
     );
 
-    // Limit concurrency to 40
-    let semaphore = Arc::new(Semaphore::new(40));
+    // Limit concurrency to 20
+    let semaphore = Arc::new(Semaphore::new(20));
     let mut handles = Vec::with_capacity(hashlist.len());
 
     for hash in hashlist {
