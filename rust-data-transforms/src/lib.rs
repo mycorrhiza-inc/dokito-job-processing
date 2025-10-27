@@ -10,6 +10,7 @@ pub mod processing;
 pub mod s3_stuff;
 pub mod sql_ingester_tasks;
 pub mod types;
+pub mod utils;
 
 // Re-export commonly used types from the types module
 pub use types::*;

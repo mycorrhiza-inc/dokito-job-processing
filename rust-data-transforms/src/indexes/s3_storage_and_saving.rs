@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::Path, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, path::Path, str::FromStr, sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::Instant};
 
 use crate::types::{
     attachments::RawAttachment,
@@ -15,6 +15,8 @@ use mycorrhiza_common::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
+use tokio::sync::Semaphore;
+use crate::utils::progress_reporter::{start_progress_reporter, log_completion_stats};
 
 use crate::indexes::attachment_url_index::AttachIndex;
 
@@ -87,15 +89,27 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
     info!("Starting attachment index generation");
     let s3_client = Arc::new(DIGITALOCEAN_S3.make_s3_client().await);
     let hashlist = get_all_attachment_hashes(&s3_client).await?;
-    info!(hashlist_length = %hashlist.len(),"Got all hashes from directory.");
+    let total_attachments = hashlist.len();
+    info!(hashlist_length = %total_attachments,"Got all hashes from directory.");
 
-    // Limit concurrency to 20
+    // Progress tracking
+    let completed_count = Arc::new(AtomicUsize::new(0));
+
+    // Start progress reporting task
+    let (progress_handle, start_time) = start_progress_reporter(
+        completed_count.clone(),
+        total_attachments,
+        "attachment_index_generation".to_string(),
+    );
+
+    // Limit concurrency to 40
     let semaphore = Arc::new(Semaphore::new(40));
     let mut handles = Vec::with_capacity(hashlist.len());
 
     for hash in hashlist {
         let s3_clone = s3_client.clone();
         let sem_clone = semaphore.clone();
+        let completed_count_clone = completed_count.clone();
         // Spawn each task
         let handle = tokio::spawn(async move {
             // Acquire a permit before starting
@@ -103,9 +117,9 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
             let res = download_openscrapers_object::<RawAttachment>(&s3_clone, &hash).await;
             if let Err(e) = &res {
                 warn!(%hash,error=%e,"Encountered error while processing hash")
-            } else {
-                info!(%hash,"Got attachment info successfully")
             };
+            // Increment counter regardless of success/failure
+            completed_count_clone.fetch_add(1, Ordering::Relaxed);
             res
         });
 
@@ -124,6 +138,16 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
             }
         }
     }
+
+    // Stop progress reporting
+    progress_handle.abort();
+
+    log_completion_stats(
+        "attachment_index_generation",
+        total_attachments,
+        start_time,
+        Some(map.len()),
+    );
 
     Ok(map)
 }
