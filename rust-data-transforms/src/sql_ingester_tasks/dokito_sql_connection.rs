@@ -17,6 +17,8 @@ pub static DEFAULT_POSTGRES_CONNECTION_URL: LazyLock<String> = LazyLock::new(|| 
 #[error("Could not initialize postgres pool")]
 pub struct InitializePostgresError {}
 
+pub const MAX_POSTGRES_CONNECTIONS: u32 = 5;
+
 static DOKITO_POOL_CELL: OnceLock<PgPool> = OnceLock::new();
 pub async fn get_dokito_pool() -> Result<&'static PgPool, InitializePostgresError> {
     if let Some(inital_pool) = DOKITO_POOL_CELL.get() {
@@ -24,7 +26,7 @@ pub async fn get_dokito_pool() -> Result<&'static PgPool, InitializePostgresErro
     }
     let db_url = &**DEFAULT_POSTGRES_CONNECTION_URL;
     let pool = PgPoolOptions::new()
-        .max_connections(40)
+        .max_connections(MAX_POSTGRES_CONNECTIONS)
         .acquire_timeout(Duration::from_secs(600))
         .connect(db_url)
         .await;
@@ -37,13 +39,18 @@ pub async fn get_dokito_pool() -> Result<&'static PgPool, InitializePostgresErro
             eprintln!("Failed to connect to database:");
             eprintln!("Error: {}", err);
             eprintln!("Debug: {:?}", err);
-            eprintln!("Connection URL pattern: {}",
+            eprintln!(
+                "Connection URL pattern: {}",
                 if db_url.contains("@") {
                     let parts: Vec<&str> = db_url.splitn(2, '@').collect();
-                    format!("{}@<REDACTED>", parts[0].chars().take(10).collect::<String>())
+                    format!(
+                        "{}@<REDACTED>",
+                        parts[0].chars().take(10).collect::<String>()
+                    )
                 } else {
                     "<NO_AUTH_INFO>".to_string()
-                });
+                }
+            );
             eprintln!("Expected environment variables: POSTGRES_CONNECTION or DATABASE_URL");
             eprintln!("");
             eprintln!("IMPORTANT: If you see 'MAC tag mismatch' error above, this is misleading!");

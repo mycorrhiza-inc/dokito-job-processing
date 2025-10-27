@@ -50,13 +50,9 @@ async fn main() -> Result<()> {
     let mut processed_dockets: Vec<_> = cli_processed_dockets.into();
 
     for processed_docket in processed_dockets.iter_mut() {
-        for filing in processed_docket.filings.iter_mut() {
-            for attachment in filing.attachments.iter_mut() {
-                if attachment.hash.is_none() {
-                    let _ = attachment.download_incomplete(extra_data.clone()).await?;
-                }
-            }
-        }
+        let _res = processed_docket
+            .download_incomplete(extra_data.clone())
+            .await?;
     }
 
     // This returns a list even if only one was imported just to make the output json schema
@@ -69,4 +65,3 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
-

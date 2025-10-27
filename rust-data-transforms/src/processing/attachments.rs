@@ -6,6 +6,7 @@ use crate::s3_stuff::{
     generate_s3_object_uri_from_key, get_raw_attach_file_key, get_s3_json_uri,
     push_raw_attach_file_to_s3, upload_object,
 };
+use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use crate::types::processed::ProcessedGenericAttachment;
 use crate::types::{attachments::RawAttachment, raw::JurisdictionInfo};
 use aws_sdk_s3::Client as S3Client;
@@ -15,12 +16,15 @@ use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::{NonEmptyString, non_empty_string};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sqlx::prelude::FromRow;
+use sqlx::{PgPool, query_as, query_scalar};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::{debug, info};
+use uuid::Uuid;
 
 use super::file_fetching::{AdvancedFetchData, FileDownloadResult, InternetFileFetch};
 
@@ -81,8 +85,61 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
         };
         shipout_attachment_to_s3(file_contents, raw_attachment, &extra_data.s3_client).await?;
         self.hash = Some(hash);
+        let pool = get_dokito_pool().await?;
+        let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
+            self,
+            extra_data.fixed_jurisdiction,
+            pool,
+        )
+        .await?;
         debug!(%hash, url = %self.url,"Successfully downloaded attachment and saved everything to s3.");
         Ok(RevalidationOutcome::DidChange)
+    }
+}
+
+enum PGUpdateOutcome {
+    DidNotExist,
+    Updated,
+}
+#[derive(FromRow, Clone)]
+struct AttachmentHashRecord {
+    uuid: Uuid,
+    file_hash_if_downloaded: String,
+}
+async fn attempt_to_update_hash_of_postgres_attachment(
+    proc_attach: &ProcessedGenericAttachment,
+    fixed_jur: FixedJurisdiction,
+    pool: &PgPool,
+) -> Result<PGUpdateOutcome, anyhow::Error> {
+    let hash_string = if let Some(val) = proc_attach.hash {
+        val.to_string()
+    } else {
+        return Ok(PGUpdateOutcome::DidNotExist);
+    };
+
+    let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    let attach_uuid_guess = proc_attach.object_uuid;
+    let optional_record: Option<AttachmentHashRecord> = query_as::<_, AttachmentHashRecord>(
+        &format!("SELECT uuid, file_hash_if_downloaded FROM {pg_schema}.attachments WHERE uuid=$1"),
+    )
+    .bind(attach_uuid_guess)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(record) = optional_record {
+        let downloaded_hash = &*record.file_hash_if_downloaded;
+        if downloaded_hash != hash_string {
+            let _res = sqlx::query(&format!(
+                "UPDATE {pg_schema}.attachments SET file_hash_if_downloaded=$1 WHERE uuid=$2"
+            ))
+            .bind(&hash_string)
+            .bind(attach_uuid_guess)
+            .execute(pool)
+            .await?;
+        }
+        Ok(PGUpdateOutcome::Updated)
+    } else {
+        Ok(PGUpdateOutcome::DidNotExist)
     }
 }
 
