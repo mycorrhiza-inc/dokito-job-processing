@@ -171,7 +171,7 @@ func EnqueuePipelineTask(ctx context.Context, govID string, intermediateSource p
 	}
 
 	// Create asynq task
-	task := asynq.NewTask(TypePipelineTask, payload, asynq.MaxRetry(3))
+	task := asynq.NewTask(TypePipelineTask, payload, asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 
 	// Enqueue the task
 	info, err := Client.Enqueue(task)
@@ -491,7 +491,7 @@ func EnqueueDownloadAttachmentsTask(ctx context.Context, govID string) (string, 
 	}
 
 	// Create asynq task
-	task := asynq.NewTask(TypeDownloadAttachmentsTask, payload, asynq.MaxRetry(3))
+	task := asynq.NewTask(TypeDownloadAttachmentsTask, payload, asynq.MaxRetry(3), asynq.Timeout(2*time.Hour))
 
 	// Enqueue the task
 	info, err := Client.Enqueue(task)

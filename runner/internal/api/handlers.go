@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"runner/internal/core"
 	"runner/internal/pipelines"
@@ -201,7 +202,14 @@ func HandleAsyncPipeline(w http.ResponseWriter, r *http.Request) {
 	var successfulGovIDs []string
 	var errors []string
 
-	for _, govID := range req.GovIDs {
+	// Randomize the order of GovIDs for better task distribution
+	shuffledGovIDs := make([]string, len(req.GovIDs))
+	copy(shuffledGovIDs, req.GovIDs)
+	rand.Shuffle(len(shuffledGovIDs), func(i, j int) {
+		shuffledGovIDs[i], shuffledGovIDs[j] = shuffledGovIDs[j], shuffledGovIDs[i]
+	})
+
+	for _, govID := range shuffledGovIDs {
 		govID = strings.TrimSpace(govID)
 		if govID == "" {
 			errors = append(errors, "empty gov_id found in list")
@@ -419,8 +427,15 @@ func HandleAsyncDownloadAttachments(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := core.WithExecutionConfig(context.Background(), config)
 
+	// Randomize the order of GovIDs for better task distribution
+	shuffledGovIDs := make([]string, len(req.GovIDs))
+	copy(shuffledGovIDs, req.GovIDs)
+	rand.Shuffle(len(shuffledGovIDs), func(i, j int) {
+		shuffledGovIDs[i], shuffledGovIDs[j] = shuffledGovIDs[j], shuffledGovIDs[i]
+	})
+
 	// Use the bulk enqueue function
-	result, err := worker.BulkEnqueueDownloadAttachmentsTasks(ctx, req.GovIDs)
+	result, err := worker.BulkEnqueueDownloadAttachmentsTasks(ctx, shuffledGovIDs)
 
 	response := AsyncDownloadAttachmentsResponse{}
 
