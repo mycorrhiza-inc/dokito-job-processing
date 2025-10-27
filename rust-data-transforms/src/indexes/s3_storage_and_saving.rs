@@ -14,11 +14,35 @@ use mycorrhiza_common::{
     },
 };
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tokio::sync::Semaphore;
 use crate::utils::progress_reporter::{start_progress_reporter, log_completion_stats};
 
 use crate::indexes::attachment_url_index::AttachIndex;
+
+const MAX_RETRY_ATTEMPTS: usize = 3;
+
+async fn download_attachment_with_retries(
+    s3_client: &Client,
+    hash: &Blake2bHash,
+) -> anyhow::Result<RawAttachment> {
+    let mut last_error = None;
+
+    for attempt in 1..=MAX_RETRY_ATTEMPTS {
+        match download_openscrapers_object::<RawAttachment>(s3_client, hash).await {
+            Ok(attachment) => return Ok(attachment),
+            Err(e) => {
+                if attempt < MAX_RETRY_ATTEMPTS {
+                    debug!(%hash, attempt = %attempt, error = %e, "Download attempt failed, retrying");
+                } else {
+                    last_error = Some(e);
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap())
+}
 
 async fn get_all_attachment_hashes(s3_client: &Client) -> anyhow::Result<Vec<Blake2bHash>> {
     let dir = "raw/metadata/";
@@ -112,9 +136,9 @@ pub async fn generate_attachment_url_index() -> anyhow::Result<AttachIndex> {
         let handle = tokio::spawn(async move {
             // Acquire a permit before starting
             let _permit = sem_clone.acquire().await.unwrap();
-            let res = download_openscrapers_object::<RawAttachment>(&s3_clone, &hash).await;
+            let res = download_attachment_with_retries(&s3_clone, &hash).await;
             if let Err(e) = &res {
-                warn!(%hash,error=%e,"Encountered error while processing hash")
+                warn!(%hash, error=%e, "Failed to download attachment after {} attempts", MAX_RETRY_ATTEMPTS);
             };
             // Increment counter regardless of success/failure
             completed_count_clone.fetch_add(1, Ordering::Relaxed);
