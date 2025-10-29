@@ -37,7 +37,7 @@ in {
 
   # Export the binaries for use in wrapper scripts
   binaries = {
-    cli = "${goCLI}/bin/dokito-cli";
-    server = "${goServer}/bin/dokito-server";
+    raw-cli = "${goCLI}/bin/dokito-cli";
+    raw-server = "${goServer}/bin/dokito-server";
   };
 }
