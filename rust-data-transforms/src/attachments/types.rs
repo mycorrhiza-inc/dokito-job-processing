@@ -10,7 +10,6 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 
-
 // Next-generation attachment types
 
 /// Attachment locator that provides stable cache keys
@@ -44,16 +43,12 @@ impl AttachmentLocator {
 pub struct AttachmentRecord {
     /// How to locate this attachment
     pub locator: AttachmentLocator,
-
     /// Jurisdiction this attachment belongs to
     pub jurisdiction: FixedJurisdiction,
-
     /// Version history (head of vec is current version)
     pub history: Vec<AttachmentVersion>,
-
     /// When this attachment was first discovered
     pub created_at: DateTime<Utc>,
-
     /// When this record was last modified
     pub updated_at: DateTime<Utc>,
 }

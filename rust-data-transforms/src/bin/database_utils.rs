@@ -1,27 +1,18 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rust_data_transforms::indexes::attachment_url_index::regenrate_url_attach_index;
-use rust_data_transforms::attachments::{AttachmentLocator, get_redis_store};
-// s3_storage_and_saving module removed - use Redis-based attachment system instead
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
+use rust_data_transforms::attachments::postgres_migration_utils::{
+    update_attachment_hashes_from_redis, migrate_attachments_to_redis
+};
 use serde_json;
 use sqlx::{FromRow, query_as};
-use uuid::Uuid;
-use std::io::{self, Read};
 use tracing_subscriber;
-use futures::stream::{self, StreamExt};
 
 #[derive(FromRow)]
 struct DocketId {
     docket_govid: String,
-}
-
-#[derive(FromRow)]
-struct AttachmentRecord {
-    uuid: Uuid,
-    attachment_url: String,
 }
 
 async fn list_docket_ids_for_jurisdiction(fixed_jur: FixedJurisdiction) -> Result<Vec<String>> {
@@ -40,106 +31,6 @@ async fn list_docket_ids_for_jurisdiction(fixed_jur: FixedJurisdiction) -> Resul
     Ok(docket_ids.into_iter().map(|d| d.docket_govid).collect())
 }
 
-// generate_and_upload_attachment_index removed - use Redis-based attachment system instead
-
-// read_attachment_index_from_stdin removed - use Redis-based attachment system instead
-
-// upload_attachment_index_from_stdin removed - use Redis-based attachment system instead
-
-async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -> Result<()> {
-    let pool = get_dokito_pool()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to get database pool: {}", e))?;
-    let pg_schema = fixed_jur.get_postgres_schema_name();
-
-    tracing::info!("Querying attachments without hashes for jurisdiction: {}", pg_schema);
-
-    // Query for all attachments that have empty file_hash_if_downloaded field
-    let attachments = query_as::<_, AttachmentRecord>(&format!(
-        "SELECT uuid, attachment_url FROM {}.attachments WHERE file_hash_if_downloaded = '' OR file_hash_if_downloaded IS NULL",
-        pg_schema
-    ))
-    .fetch_all(pool)
-    .await?;
-
-    tracing::info!("Found {} attachments without hashes", attachments.len());
-
-    if attachments.is_empty() {
-        tracing::info!("No attachments found without hashes, exiting");
-        return Ok(());
-    }
-
-    // Get Redis store for the new attachment system
-    let redis_store = get_redis_store().await
-        .ok_or_else(|| anyhow::anyhow!("Failed to get Redis attachment store"))?;
-
-    // Process attachments concurrently with a limit of 20 at a time
-    let update_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let processed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-    use futures_util::{StreamExt, stream};
-
-    stream::iter(attachments)
-        .map(|attachment| {
-            let pool_ref = pool;
-            let pg_schema = pg_schema;
-            let update_count = update_count.clone();
-            let processed_count = processed_count.clone();
-            let redis_store = &redis_store;
-
-            async move {
-                processed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let current_processed = processed_count.load(std::sync::atomic::Ordering::Relaxed);
-
-                if current_processed % 100 == 0 {
-                    tracing::info!("Processed {} attachments so far", current_processed);
-                }
-
-                // Look up the attachment record from Redis using URL
-                if let Ok(Some(record)) = redis_store.get_by_url(&attachment.attachment_url).await {
-                    if let Some(current_version) = record.current_version() {
-                        let hash_string = current_version.content_hash.to_string();
-                        // Update the database with the found hash
-                        match sqlx::query(&format!(
-                            "UPDATE {}.attachments SET file_hash_if_downloaded = $1 WHERE uuid = $2",
-                            pg_schema
-                        ))
-                        .bind(&hash_string)
-                        .bind(&attachment.uuid)
-                        .execute(pool_ref)
-                        .await
-                        {
-                            Ok(_) => {
-                                update_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                tracing::debug!("Updated hash for attachment {} (URL: {})", attachment.uuid, attachment.attachment_url);
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to update attachment {}: {}", attachment.uuid, e);
-                            }
-                        }
-                    } else {
-                        tracing::debug!("Found attachment in Redis but no current version for URL: {}", attachment.attachment_url);
-                    }
-                } else {
-                    tracing::debug!("No attachment record found in Redis for URL: {}", attachment.attachment_url);
-                }
-            }
-        })
-        .buffer_unordered(20) // Process up to 20 concurrently
-        .collect::<Vec<_>>()
-        .await;
-
-    let final_update_count = update_count.load(std::sync::atomic::Ordering::Relaxed);
-    let final_processed_count = processed_count.load(std::sync::atomic::Ordering::Relaxed);
-
-    tracing::info!(
-        "Completed processing {} attachments. Updated {} attachments with hashes from Redis cache",
-        final_processed_count,
-        final_update_count
-    );
-
-    Ok(())
-}
 
 #[derive(Parser)]
 #[command(name = "database-utils")]
@@ -165,6 +56,11 @@ enum Commands {
     /// Update attachment hashes from Redis cache for attachments missing file_hash_if_downloaded
     UpdateAttachmentHashesFromRedis {
         #[arg(long, value_enum, help = "Fixed jurisdiction to update attachment hashes for")]
+        fixed_jur: FixedJurisdiction,
+    },
+    /// Migrate PostgreSQL attachment data to Redis attachment system
+    MigrateAttachmentsToRedis {
+        #[arg(long, value_enum, help = "Fixed jurisdiction to migrate attachments for")]
         fixed_jur: FixedJurisdiction,
     },
 }
@@ -214,6 +110,16 @@ async fn main() -> Result<()> {
             update_attachment_hashes_from_redis(fixed_jur).await?;
 
             tracing::info!("Successfully completed attachment hash update operation");
+        }
+        Commands::MigrateAttachmentsToRedis { fixed_jur } => {
+            tracing::info!(
+                "Starting PostgreSQL to Redis attachment migration for jurisdiction: {}",
+                fixed_jur.get_postgres_schema_name()
+            );
+
+            migrate_attachments_to_redis(fixed_jur).await?;
+
+            tracing::info!("Successfully completed attachment migration operation");
         }
     }
 

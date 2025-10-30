@@ -1,5 +1,6 @@
 //! Next-generation attachment system with Redis storage and history tracking
 pub mod downloading_logic;
+pub mod postgres_migration_utils;
 pub mod redis_store;
 pub mod tags;
 pub mod types;
@@ -8,7 +9,4 @@ pub mod types;
 pub use downloading_logic::{AttachmentProcessor, OpenscrapersExtraData};
 pub use redis_store::{RedisAttachmentStore, get_redis_store};
 pub use tags::AttachmentTag;
-pub use types::{
-    AttachmentLocator, AttachmentRecord, AttachmentVersion,
-};
-
+pub use types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
