@@ -1,0 +1,262 @@
+//! Next-generation attachment downloading with history tracking
+
+use super::tags::AttachmentTag;
+use super::v2_redis_store::V2RedisAttachmentStore;
+use super::v2_types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
+use crate::data_processing_traits::RevalidationOutcome;
+use crate::jurisdiction_schema_mapping::FixedJurisdiction;
+use crate::processing::file_fetching::{FileDownloadError, FileDownloadResult, InternetFileFetch};
+// S3 functions are imported via the old downloading module
+use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
+use crate::types::processed::ProcessedGenericAttachment;
+use crate::types::raw::JurisdictionInfo;
+use aws_sdk_s3::Client as S3Client;
+use chrono::Utc;
+use mycorrhiza_common::file_extension::FileExtension;
+use mycorrhiza_common::hash::Blake2bHash;
+use non_empty_string::{NonEmptyString, non_empty_string};
+// SQL functions are imported via the old downloading module
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
+use tokio::time::sleep;
+use tracing::{debug, info, warn};
+// UUID imported via other modules
+use anyhow::Result;
+
+const ATTACHMENT_DOWNLOAD_TRIES: usize = 2;
+const DOWNLOAD_RETRY_DELAY_SECONDS: u64 = 2;
+
+/// Enhanced extra data for v2 attachment processing
+#[derive(Clone)]
+pub struct V2OpenscrapersExtraData {
+    pub s3_client: S3Client,
+    pub jurisdiction_info: JurisdictionInfo,
+    pub fixed_jurisdiction: FixedJurisdiction,
+}
+
+/// V2 implementation of DownloadIncomplete using the new attachment system
+pub struct V2AttachmentProcessor;
+
+impl V2AttachmentProcessor {
+    /// Process attachment download with v2 system
+    pub async fn download_incomplete(
+        attachment: &mut ProcessedGenericAttachment,
+        extra_data: V2OpenscrapersExtraData,
+    ) -> anyhow::Result<RevalidationOutcome> {
+        if attachment.hash.is_some() {
+            return Ok(RevalidationOutcome::NoChanges);
+        }
+
+        let name = NonEmptyString::from_str(&attachment.name)
+            .unwrap_or_else(|_| non_empty_string!("unknown_filename"));
+
+        let pool = get_dokito_pool().await?;
+        let locator = AttachmentLocator::Url(attachment.url.clone());
+
+        // Check v2 Redis cache first
+        if let Some(cached_record) = lookup_attachment_from_v2_redis(&locator).await {
+            if let Some(current_version) = cached_record.current_version() {
+                attachment.hash = Some(current_version.content_hash);
+                let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
+                    attachment,
+                    extra_data.fixed_jurisdiction,
+                    &pool,
+                )
+                .await?;
+
+                // Mark as checked in v2 system
+                if let Err(e) = mark_attachment_checked(&locator).await {
+                    warn!("Failed to mark attachment as checked: {}", e);
+                }
+
+                return Ok(RevalidationOutcome::DidChange);
+            }
+        }
+
+        debug!(url=%attachment.url, "Downloading attachment file with v2 system");
+        let extension = &attachment.document_extension;
+
+        let download_start = Instant::now();
+
+        let FileDownloadResult {
+            data: file_contents,
+            filename: server_filename,
+        } = download_file_content_validated_with_retries(&attachment.url, extension).await?;
+        let download_time_seconds = Instant::now().duration_since(download_start).as_secs_f64();
+        let upload_start = Instant::now();
+        let hash = Blake2bHash::from_bytes(&file_contents);
+        debug!(%hash, url=%attachment.url, "Successfully downloaded file with v2 system");
+
+        let mut metadata = HashMap::new();
+        if let Some(server_name) = server_filename {
+            metadata.insert("server_filename".to_string(), server_name);
+        }
+
+        // Create new attachment version
+        let version = AttachmentVersion::new(
+            hash,
+            file_contents.len() as u64,
+            name.clone(),
+            extension.clone(),
+        ).with_metadata("download_time_seconds".to_string(), download_time_seconds.to_string());
+
+        // Add any additional metadata
+        let version = metadata.clone().into_iter().fold(version, |v, (k, val)| v.with_metadata(k, val));
+
+        // Ship to S3 (using existing S3 infrastructure)
+        let legacy_raw_attachment = create_legacy_raw_attachment_for_s3(
+            &extra_data,
+            hash,
+            &name,
+            extension,
+            file_contents.len() as u64,
+            &attachment.url,
+            &metadata,
+        );
+
+        let _final_raw_attachment = shipout_attachment_to_s3(
+            file_contents,
+            legacy_raw_attachment,
+            &extra_data.s3_client
+        ).await?;
+
+        attachment.hash = Some(hash);
+
+        // Update postgres
+        let update_pg_result = attempt_to_update_hash_of_postgres_attachment(
+            attachment,
+            extra_data.fixed_jurisdiction,
+            &pool,
+        ).await;
+        if let Err(err) = update_pg_result {
+            warn!(%err, url=%attachment.url, %hash, "Updating attachment hash in postgres encountered an error");
+        }
+
+        // Store in v2 Redis system
+        if let Err(err) = store_attachment_in_v2_redis(&locator, extra_data.fixed_jurisdiction, version).await {
+            warn!(%err, url=%attachment.url, %hash, "Failed to store attachment in v2 Redis system");
+        }
+
+        let upload_time_seconds = Instant::now().duration_since(upload_start).as_secs_f64();
+        info!(%hash, url=%attachment.url, %download_time_seconds, %upload_time_seconds, "Successfully downloaded attachment with v2 system");
+        Ok(RevalidationOutcome::DidChange)
+    }
+}
+
+/// Lookup attachment from v2 Redis system
+async fn lookup_attachment_from_v2_redis(locator: &AttachmentLocator) -> Option<AttachmentRecord> {
+    let store = V2RedisAttachmentStore::new().ok()?;
+    store.get(locator).await.ok().flatten()
+}
+
+/// Store attachment in v2 Redis system
+async fn store_attachment_in_v2_redis(
+    locator: &AttachmentLocator,
+    jurisdiction: FixedJurisdiction,
+    version: AttachmentVersion,
+) -> Result<()> {
+    let store = V2RedisAttachmentStore::new()?;
+
+    // Check if record already exists
+    if let Some(mut existing_record) = store.get(locator).await? {
+        // Check if this is a new version or same content
+        if let Some(current_version) = existing_record.current_version() {
+            if current_version.same_content(&version) {
+                // Same content, just mark as checked
+                existing_record.mark_checked();
+                store.update(&existing_record).await?;
+                return Ok(());
+            }
+        }
+
+        // New version, add it to history
+        existing_record.add_version(version);
+        store.update(&existing_record).await?;
+    } else {
+        // Create new record
+        let mut record = AttachmentRecord::new(locator.clone(), jurisdiction);
+        record.add_version(version);
+
+        // Store as downloaded since we just downloaded it
+        let tag = AttachmentTag::new(jurisdiction, true);
+        store.store(&record, tag).await?;
+    }
+
+    Ok(())
+}
+
+/// Mark attachment as checked in v2 system
+async fn mark_attachment_checked(locator: &AttachmentLocator) -> Result<()> {
+    let store = V2RedisAttachmentStore::new()?;
+    store.mark_checked(locator).await
+}
+
+/// Create a legacy RawAttachment for S3 compatibility
+fn create_legacy_raw_attachment_for_s3(
+    extra_data: &V2OpenscrapersExtraData,
+    hash: Blake2bHash,
+    name: &NonEmptyString,
+    extension: &FileExtension,
+    file_size_bytes: u64,
+    url: &str,
+    metadata: &HashMap<String, String>,
+) -> crate::attachments::types::RawAttachment {
+    crate::attachments::types::RawAttachment {
+        jurisdiction_info: extra_data.jurisdiction_info.clone(),
+        url: url.to_string(),
+        hash,
+        file_size_bytes,
+        name: name.clone(),
+        extension: extension.clone(),
+        text_objects: vec![],
+        date_added: Utc::now(),
+        date_updated: Utc::now(),
+        extra_metadata: metadata.clone(),
+    }
+}
+
+// Re-use existing functions from the old system
+use crate::attachments::downloading::{
+    attempt_to_update_hash_of_postgres_attachment,
+    shipout_attachment_to_s3,
+};
+
+static MAXIMUM_EXTERNAL_FILE_DOWNLOADS: Semaphore = Semaphore::const_new(10);
+
+async fn download_file_content_validated_with_retries<T: InternetFileFetch + ?Sized>(
+    to_fetch: &T,
+    extension: &FileExtension,
+) -> Result<FileDownloadResult, FileDownloadError> {
+    let permit = MAXIMUM_EXTERNAL_FILE_DOWNLOADS.acquire().await.unwrap();
+    let mut last_error: Option<FileDownloadError> = None;
+    for _ in 0..ATTACHMENT_DOWNLOAD_TRIES {
+        match to_fetch
+            .download_file_with_timeout(Duration::from_secs(60))
+            .await
+        {
+            Ok(file_contents) => {
+                if let Err(err) = extension.is_valid_file_contents(&file_contents.data) {
+                    tracing::error!(%extension, ?to_fetch, %err, "Downloaded file did not match extension");
+                    last_error = Some(FileDownloadError::InvalidReturnData(err))
+                } else {
+                    return Ok(file_contents);
+                }
+            }
+            Err(err) => {
+                tracing::error!(?to_fetch, %err, "Encountered error downloading file");
+                if !err.is_retryable() {
+                    return Err(err);
+                };
+                last_error = Some(err);
+            }
+        };
+        sleep(Duration::from_secs(DOWNLOAD_RETRY_DELAY_SECONDS)).await;
+    }
+
+    tracing::error!(%extension, ?to_fetch, "Could not download file from url despite retries");
+    drop(permit);
+
+    Err(last_error.unwrap())
+}

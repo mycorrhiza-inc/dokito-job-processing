@@ -1,64 +1,38 @@
-//! Legacy attachment URL index - now redirects to new attachment system
-//! This file maintains compatibility while using the new Redis-based tag system
+//! Stub for old attachment URL index - now replaced by v2 attachment system
 
-// Re-export the new functions with the same names for compatibility
-pub use crate::attachments::{lookup_hash_from_url, cache_attachment};
-
-use crate::attachments::{AttachmentTag, RedisAttachmentStore};
-use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::attachments::types::RawAttachment;
 use anyhow::Result;
 use async_trait::async_trait;
 use mycorrhiza_common::tasks::{ExecuteUserTask, display_error_as_json};
 use std::collections::BTreeMap;
-use tracing::{info, warn};
+use tracing::warn;
+
+use crate::attachments::types::RawAttachment;
 
 pub type AttachIndex = BTreeMap<String, RawAttachment>;
 
-/// Regenerate attachment index - now populates Redis with tag-based system
-pub async fn regenrate_url_attach_index() -> anyhow::Result<()> {
-    info!("Starting attachment index regeneration using new Redis tag system");
+/// Stub for old lookup function - now redirects users to v2 system
+pub async fn lookup_hash_from_url(_url: &str) -> Option<RawAttachment> {
+    warn!("lookup_hash_from_url is deprecated - use v2 attachment system instead");
+    None
+}
 
-    // Note: In a real migration, you would:
-    // 1. Load existing attachments from S3 or other source
-    // 2. Populate Redis with appropriate tags based on jurisdiction
-    // 3. Clean up old index storage
-
-    // For now, this is a placeholder that maintains the interface
-    warn!("Attachment index regeneration is now handled by the new Redis tag system");
-    warn!("Please use the new attachment management functions in the attachments module");
-
+/// Stub for old cache function - now redirects users to v2 system
+pub async fn cache_attachment(_url: &str, _attachment: &RawAttachment) -> Result<()> {
+    warn!("cache_attachment is deprecated - use v2 attachment system instead");
     Ok(())
 }
 
-/// Upload provided attachment index - now stores in Redis with tags
-pub async fn upload_provided_attachment_index(attach_index: AttachIndex) -> anyhow::Result<()> {
-    info!("Uploading attachment index to new Redis tag system");
+/// Regenerate attachment index - now redirects to v2 system
+pub async fn regenrate_url_attach_index() -> anyhow::Result<()> {
+    warn!("regenrate_url_attach_index is deprecated");
+    warn!("Use V2AttachmentProcessor and populate from PostgreSQL instead");
+    Ok(())
+}
 
-    let store = RedisAttachmentStore::new()?;
-    let mut processed_count = 0;
-
-    for (url, attachment) in attach_index.iter() {
-        // Determine jurisdiction from attachment
-        let jurisdiction = match FixedJurisdiction::try_from(&attachment.jurisdiction_info) {
-            Ok(jur) => jur,
-            Err(_) => {
-                warn!("Could not determine jurisdiction for URL: {}, skipping", url);
-                continue;
-            }
-        };
-
-        // Store as downloaded since these are existing attachments
-        let tag = AttachmentTag::new(jurisdiction, true);
-
-        if let Err(e) = store.store(attachment, tag).await {
-            warn!("Failed to store attachment for URL {}: {}", url, e);
-        } else {
-            processed_count += 1;
-        }
-    }
-
-    info!("Successfully migrated {} attachments to new Redis tag system", processed_count);
+/// Upload provided attachment index - now redirects to v2 system
+pub async fn upload_provided_attachment_index(_attach_index: AttachIndex) -> anyhow::Result<()> {
+    warn!("upload_provided_attachment_index is deprecated");
+    warn!("Use V2AttachmentProcessor and populate from PostgreSQL instead");
     Ok(())
 }
 
@@ -70,7 +44,7 @@ impl ExecuteUserTask for RegenerateUrlAttachIndex {
     async fn execute_task(self: Box<Self>) -> Result<serde_json::Value, serde_json::Value> {
         let res = regenrate_url_attach_index().await;
         match res {
-            Ok(_) => Ok("Task Succeeded - migrated to new Redis tag system".into()),
+            Ok(_) => Ok("Task deprecated - use v2 attachment system".into()),
             Err(err) => Err(display_error_as_json(&err)),
         }
     }

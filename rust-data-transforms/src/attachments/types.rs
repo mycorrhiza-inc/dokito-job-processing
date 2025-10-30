@@ -3,7 +3,7 @@ use mycorrhiza_common::{file_extension::FileExtension, hash::Blake2bHash};
 use non_empty_string::NonEmptyString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 use uuid::Uuid;
 
 use crate::{jurisdiction_schema_mapping::FixedJurisdiction, types::raw::JurisdictionInfo};
@@ -66,11 +66,19 @@ pub struct RawAttachment {
 // But I want to know your thoughts on other ways this could be handled. Be brutally honest, does
 // this approach not work?
 
-#[repr(transparent)]
 pub enum UniversalAttachmentLocator {
     Url(String),
 }
 
+impl Display for UniversalAttachmentLocator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UniversalAttachmentLocator::Url(url_content) => write!(f, "url_{url_content}"),
+        }
+    }
+}
+
+// Some hypothetical changes to the way that raw attachments are stored and handled.
 pub struct RawAttachmentMetadata {
     pub url: UniversalAttachmentLocator,
     pub current_file_hash: Option<Blake2bHash>,
@@ -79,7 +87,6 @@ pub struct RawAttachmentMetadata {
     pub extension: FileExtension,
     pub last_queried_time: Option<DateTime<Utc>>,
     pub fixed_jurisdiction: FixedJurisdiction,
-    pub associated_attachment_uuids: Vec<Uuid>,
     pub history: Vec<RawAttachmentHistoryPoint>,
 }
 

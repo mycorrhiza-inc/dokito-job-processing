@@ -1,6 +1,6 @@
 //! Attachment downloading functionality with new Redis-based caching
 
-use crate::attachments::{AttachmentTag, RedisAttachmentStore};
+use crate::attachments::AttachmentTag;
 use crate::data_processing_traits::{DownloadIncomplete, RevalidationOutcome};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::file_fetching::{FileDownloadError, RequestMethod, AdvancedFetchData, FileDownloadResult, InternetFileFetch};
@@ -121,23 +121,20 @@ impl DownloadIncomplete for ProcessedGenericAttachment {
 }
 
 /// Lookup attachment from Redis using new tag-based system
-async fn lookup_attachment_from_redis(url: &str) -> Option<RawAttachment> {
-    let store = RedisAttachmentStore::new().ok()?;
-    store.get(url).await.ok().flatten()
+async fn lookup_attachment_from_redis(_url: &str) -> Option<RawAttachment> {
+    // This function is deprecated in favor of v2 system
+    warn!("lookup_attachment_from_redis is deprecated - use v2 attachment system instead");
+    None
 }
 
 /// Cache attachment in Redis using new tag-based system as undownloaded initially
-async fn cache_attachment_in_redis(attachment: &RawAttachment, jurisdiction: FixedJurisdiction) -> Result<()> {
-    let store = RedisAttachmentStore::new()?;
-
-    // Store as downloaded since we just downloaded it
-    let tag = AttachmentTag::new(jurisdiction, true);
-    store.store(attachment, tag).await?;
-
+async fn cache_attachment_in_redis(_attachment: &RawAttachment, _jurisdiction: FixedJurisdiction) -> Result<()> {
+    // This function is deprecated in favor of v2 system
+    warn!("cache_attachment_in_redis is deprecated - use v2 attachment system instead");
     Ok(())
 }
 
-enum PGUpdateOutcome {
+pub enum PGUpdateOutcome {
     DidNotExist,
     Updated,
 }
@@ -148,7 +145,7 @@ struct AttachmentHashRecord {
     file_hash_if_downloaded: String,
 }
 
-async fn attempt_to_update_hash_of_postgres_attachment(
+pub async fn attempt_to_update_hash_of_postgres_attachment(
     proc_attach: &ProcessedGenericAttachment,
     fixed_jur: FixedJurisdiction,
     pool: &PgPool,
@@ -185,7 +182,7 @@ async fn attempt_to_update_hash_of_postgres_attachment(
     }
 }
 
-async fn shipout_attachment_to_s3(
+pub async fn shipout_attachment_to_s3(
     file_contents: Vec<u8>,
     mut raw_attachment: RawAttachment,
     s3_client: &S3Client,
