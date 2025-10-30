@@ -1,5 +1,5 @@
 use super::tags::AttachmentTag;
-use crate::types::attachments::RawAttachment;
+use crate::attachments::types::RawAttachment;
 use anyhow::{Context, Result};
 use redis::{AsyncCommands, Client};
 use serde_json;

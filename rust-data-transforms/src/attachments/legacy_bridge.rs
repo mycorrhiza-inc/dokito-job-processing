@@ -2,7 +2,7 @@
 
 use super::{AttachmentTag, RedisAttachmentStore};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::types::attachments::RawAttachment;
+use crate::attachments::types::RawAttachment;
 use anyhow::Result;
 use tracing::warn;
 
@@ -39,7 +39,9 @@ pub async fn cache_attachment(_url: &str, attachment: &RawAttachment) -> Result<
     let jurisdiction = match FixedJurisdiction::try_from(&attachment.jurisdiction_info) {
         Ok(jur) => jur,
         Err(_) => {
-            warn!("Could not determine FixedJurisdiction from attachment jurisdiction_info, defaulting to NewYorkPuc");
+            warn!(
+                "Could not determine FixedJurisdiction from attachment jurisdiction_info, defaulting to NewYorkPuc"
+            );
             FixedJurisdiction::NewYorkPuc
         }
     };
@@ -50,3 +52,4 @@ pub async fn cache_attachment(_url: &str, attachment: &RawAttachment) -> Result<
 
     Ok(())
 }
+

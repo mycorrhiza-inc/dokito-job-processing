@@ -8,10 +8,8 @@ use std::{
     },
 };
 
-use crate::types::{
-    attachments::RawAttachment,
-    env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET},
-};
+use crate::attachments::types::RawAttachment;
+use crate::types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
 use crate::utils::progress_reporter::{log_completion_stats, start_progress_reporter};
 use aws_sdk_s3::Client;
 use mycorrhiza_common::{

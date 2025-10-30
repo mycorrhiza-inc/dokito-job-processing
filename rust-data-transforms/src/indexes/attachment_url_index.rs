@@ -6,7 +6,7 @@ pub use crate::attachments::{lookup_hash_from_url, cache_attachment};
 
 use crate::attachments::{AttachmentTag, RedisAttachmentStore};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::types::attachments::RawAttachment;
+use crate::attachments::types::RawAttachment;
 use anyhow::Result;
 use async_trait::async_trait;
 use mycorrhiza_common::tasks::{ExecuteUserTask, display_error_as_json};

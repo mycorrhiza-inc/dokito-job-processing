@@ -2,7 +2,7 @@
 
 use super::{AttachmentTag, RedisAttachmentStore};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::types::attachments::RawAttachment;
+use crate::attachments::types::RawAttachment;
 use anyhow::Result;
 use tracing::warn;
 

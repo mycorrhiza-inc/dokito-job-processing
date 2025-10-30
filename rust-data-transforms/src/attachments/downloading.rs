@@ -10,7 +10,8 @@ use crate::s3_stuff::{
 };
 use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use crate::types::processed::ProcessedGenericAttachment;
-use crate::types::{attachments::RawAttachment, raw::JurisdictionInfo};
+use crate::attachments::types::RawAttachment;
+use crate::types::raw::JurisdictionInfo;
 use aws_sdk_s3::Client as S3Client;
 use chrono::Utc;
 use mycorrhiza_common::file_extension::FileExtension;
