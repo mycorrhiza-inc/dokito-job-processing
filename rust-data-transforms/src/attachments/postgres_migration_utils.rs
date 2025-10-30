@@ -2,15 +2,13 @@ use anyhow::Result;
 use mycorrhiza_common::file_extension::{FileExtension, StaticExtension};
 use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::NonEmptyString;
-use rust_data_transforms::attachments::{
-    AttachmentLocator, AttachmentRecord, AttachmentTag, AttachmentVersion, RedisAttachmentStore,
-};
-use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
-use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use sqlx::FromRow;
 use uuid::Uuid;
 
-use crate::attachments::get_redis_store;
+use crate::attachments::{
+    AttachmentLocator, AttachmentRecord, AttachmentTag, AttachmentVersion, RedisAttachmentStore,
+    get_redis_store,
+};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 
@@ -137,7 +135,7 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
         pg_schema
     );
 
-    let redis_store = rust_data_transforms::attachments::get_redis_store()
+    let redis_store = get_redis_store()
         .await
         .ok_or_else(|| anyhow::anyhow!("Failed to get Redis attachment store"))?;
 
