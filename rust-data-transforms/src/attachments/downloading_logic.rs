@@ -3,7 +3,7 @@
 use super::tags::AttachmentTag;
 use super::redis_store::RedisAttachmentStore;
 use super::types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
-use crate::data_processing_traits::RevalidationOutcome;
+use crate::data_processing_traits::{DownloadIncomplete, RevalidationOutcome};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::file_fetching::{FileDownloadError, FileDownloadResult, InternetFileFetch};
 // S3 functions are imported via the old downloading module
@@ -11,6 +11,7 @@ use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use crate::types::processed::ProcessedGenericAttachment;
 use crate::types::raw::JurisdictionInfo;
 use aws_sdk_s3::Client as S3Client;
+use sqlx::prelude::FromRow;
 use chrono::Utc;
 use mycorrhiza_common::file_extension::FileExtension;
 use mycorrhiza_common::hash::Blake2bHash;
@@ -145,6 +146,17 @@ impl AttachmentProcessor {
     }
 }
 
+/// Trait implementation for backward compatibility
+impl DownloadIncomplete for ProcessedGenericAttachment {
+    type ExtraData = OpenscrapersExtraData;
+    async fn download_incomplete(
+        &mut self,
+        extra_data: Self::ExtraData,
+    ) -> anyhow::Result<RevalidationOutcome> {
+        AttachmentProcessor::download_incomplete(self, extra_data).await
+    }
+}
+
 /// Lookup attachment from Redis system
 async fn lookup_attachment_from_redis(locator: &AttachmentLocator) -> Option<AttachmentRecord> {
     let store = RedisAttachmentStore::new().ok()?;
@@ -195,7 +207,7 @@ async fn mark_attachment_checked(locator: &AttachmentLocator) -> Result<()> {
 
 /// Create a legacy RawAttachment for S3 compatibility
 fn create_legacy_raw_attachment_for_s3(
-    extra_data: &V2OpenscrapersExtraData,
+    extra_data: &OpenscrapersExtraData,
     hash: Blake2bHash,
     name: &NonEmptyString,
     extension: &FileExtension,
@@ -217,11 +229,71 @@ fn create_legacy_raw_attachment_for_s3(
     }
 }
 
-// Re-use existing functions from the old system
-use crate::attachments::downloading::{
-    attempt_to_update_hash_of_postgres_attachment,
-    shipout_attachment_to_s3,
-};
+// Supporting types and functions
+pub enum PGUpdateOutcome {
+    DidNotExist,
+    Updated,
+}
+
+#[derive(sqlx::FromRow, Clone)]
+struct AttachmentHashRecord {
+    uuid: uuid::Uuid,
+    file_hash_if_downloaded: String,
+}
+
+pub async fn attempt_to_update_hash_of_postgres_attachment(
+    proc_attach: &ProcessedGenericAttachment,
+    fixed_jur: FixedJurisdiction,
+    pool: &sqlx::PgPool,
+) -> Result<PGUpdateOutcome, anyhow::Error> {
+    let hash_string = if let Some(val) = proc_attach.hash {
+        val.to_string()
+    } else {
+        return Ok(PGUpdateOutcome::DidNotExist);
+    };
+
+    let pg_schema = fixed_jur.get_postgres_schema_name();
+
+    let attach_uuid_guess = proc_attach.object_uuid;
+    let optional_record: Option<AttachmentHashRecord> = sqlx::query_as::<_, AttachmentHashRecord>(
+        &format!("SELECT uuid, file_hash_if_downloaded FROM {pg_schema}.attachments WHERE uuid=$1"),
+    )
+    .bind(attach_uuid_guess)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(record) = optional_record {
+        let downloaded_hash = &*record.file_hash_if_downloaded;
+        if downloaded_hash != hash_string {
+            let _res = sqlx::query(&format!(
+                "UPDATE {pg_schema}.attachments SET file_hash_if_downloaded=$1, updated_at=NOW() WHERE uuid=$2"
+            ))
+            .bind(&hash_string)
+            .bind(attach_uuid_guess)
+            .execute(pool)
+            .await?;
+        }
+        Ok(PGUpdateOutcome::Updated)
+    } else {
+        Ok(PGUpdateOutcome::DidNotExist)
+    }
+}
+
+pub async fn shipout_attachment_to_s3(
+    file_contents: Vec<u8>,
+    mut raw_attachment: crate::attachments::types::RawAttachment,
+    s3_client: &aws_sdk_s3::Client,
+) -> anyhow::Result<crate::attachments::types::RawAttachment> {
+    use crate::s3_stuff::{push_raw_attach_file_to_s3, upload_object};
+
+    let hash = raw_attachment.hash;
+    push_raw_attach_file_to_s3(s3_client, &raw_attachment, file_contents).await?;
+
+    raw_attachment.date_updated = Utc::now();
+
+    upload_object(s3_client, &hash, &raw_attachment).await?;
+
+    Ok(raw_attachment)
+}
 
 static MAXIMUM_EXTERNAL_FILE_DOWNLOADS: Semaphore = Semaphore::const_new(10);
 

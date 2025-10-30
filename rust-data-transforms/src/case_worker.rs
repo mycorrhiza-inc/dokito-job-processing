@@ -1,5 +1,6 @@
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::processing::{attachments::OpenscrapersExtraData, process_case};
+use crate::attachments::OpenscrapersExtraData;
+use crate::processing::process_case;
 use crate::s3_stuff::make_s3_client;
 use async_trait::async_trait;
 use crate::types::raw::RawDocketWithJurisdiction;

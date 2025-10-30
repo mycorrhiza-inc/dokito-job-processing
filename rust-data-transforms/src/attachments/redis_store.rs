@@ -21,9 +21,9 @@ pub struct RedisAttachmentStore {
 impl RedisAttachmentStore {
     /// Create a new Redis attachment store
     pub fn new() -> Result<Self> {
-        let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-        let client = Client::open(redis_url.as_str())
-            .context("Failed to create Redis client")?;
+        let redis_url =
+            env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let client = Client::open(redis_url.as_str()).context("Failed to create Redis client")?;
 
         Ok(Self { client })
     }
@@ -46,8 +46,8 @@ impl RedisAttachmentStore {
         let mut conn = self.get_connection().await?;
 
         // Serialize record to JSON
-        let data = serde_json::to_string(record)
-            .context("Failed to serialize attachment record")?;
+        let data =
+            serde_json::to_string(record).context("Failed to serialize attachment record")?;
 
         let key = Self::record_key(&record.locator);
         let cache_key = record.locator.cache_key();
@@ -62,10 +62,15 @@ impl RedisAttachmentStore {
         // Add cache key to the tag set
         pipe.sadd(tag.redis_key(), &cache_key);
 
-        let _: () = pipe.query_async(&mut conn).await
+        let _: () = pipe
+            .query_async(&mut conn)
+            .await
             .context("Failed to store attachment record")?;
 
-        debug!("Stored attachment record with locator: {:?} and tag: {}", record.locator, tag);
+        debug!(
+            "Stored attachment record with locator: {:?} and tag: {}",
+            record.locator, tag
+        );
         Ok(())
     }
 
@@ -74,7 +79,9 @@ impl RedisAttachmentStore {
         let mut conn = self.get_connection().await?;
         let key = Self::record_key(locator);
 
-        let data: Option<String> = conn.hget(&key, "data").await
+        let data: Option<String> = conn
+            .hget(&key, "data")
+            .await
             .context("Failed to get attachment record data")?;
 
         match data {
@@ -123,12 +130,21 @@ impl RedisAttachmentStore {
             }
         }
 
-        debug!("Retrieved {} attachment records for tag: {}", records.len(), tag);
+        debug!(
+            "Retrieved {} attachment records for tag: {}",
+            records.len(),
+            tag
+        );
         Ok(records)
     }
 
     /// Change the tag of an attachment atomically
-    pub async fn change_tag(&self, locator: &AttachmentLocator, from_tag: AttachmentTag, to_tag: AttachmentTag) -> Result<()> {
+    pub async fn change_tag(
+        &self,
+        locator: &AttachmentLocator,
+        from_tag: AttachmentTag,
+        to_tag: AttachmentTag,
+    ) -> Result<()> {
         let mut conn = self.get_connection().await?;
         let cache_key = locator.cache_key();
 
@@ -142,10 +158,15 @@ impl RedisAttachmentStore {
         // Add to new tag
         pipe.sadd(to_tag.redis_key(), &cache_key);
 
-        let _: () = pipe.query_async(&mut conn).await
+        let _: () = pipe
+            .query_async(&mut conn)
+            .await
             .context("Failed to change tag")?;
 
-        debug!("Changed tag for locator: {:?} from {} to {}", locator, from_tag, to_tag);
+        debug!(
+            "Changed tag for locator: {:?} from {} to {}",
+            locator, from_tag, to_tag
+        );
         Ok(())
     }
 
@@ -154,25 +175,39 @@ impl RedisAttachmentStore {
         let mut conn = self.get_connection().await?;
 
         // Serialize record to JSON
-        let data = serde_json::to_string(record)
-            .context("Failed to serialize attachment record")?;
+        let data =
+            serde_json::to_string(record).context("Failed to serialize attachment record")?;
 
         let key = Self::record_key(&record.locator);
 
         // Update the record data
-        let _: () = conn.hset(&key, "data", &data).await
+        let _: () = conn
+            .hset(&key, "data", &data)
+            .await
             .context("Failed to update attachment record")?;
 
-        debug!("Updated attachment record with locator: {:?}", record.locator);
+        debug!(
+            "Updated attachment record with locator: {:?}",
+            record.locator
+        );
         Ok(())
     }
 
     /// Add a new version to an existing attachment record
-    pub async fn add_version(&self, locator: &AttachmentLocator, version: AttachmentVersion) -> Result<()> {
+    pub async fn add_version(
+        &self,
+        locator: &AttachmentLocator,
+        version: AttachmentVersion,
+    ) -> Result<()> {
         // Get the current record
         let mut record = match self.get(locator).await? {
             Some(record) => record,
-            None => return Err(anyhow::anyhow!("Attachment record not found for locator: {:?}", locator)),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Attachment record not found for locator: {:?}",
+                    locator
+                ));
+            }
         };
 
         // Add the new version
@@ -187,7 +222,12 @@ impl RedisAttachmentStore {
         // Get the current record
         let mut record = match self.get(locator).await? {
             Some(record) => record,
-            None => return Err(anyhow::anyhow!("Attachment record not found for locator: {:?}", locator)),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Attachment record not found for locator: {:?}",
+                    locator
+                ));
+            }
         };
 
         // Mark as checked
@@ -201,7 +241,9 @@ impl RedisAttachmentStore {
     pub async fn list_cache_keys_by_tag(&self, tag: AttachmentTag) -> Result<Vec<String>> {
         let mut conn = self.get_connection().await?;
 
-        let cache_keys: Vec<String> = conn.smembers(tag.redis_key()).await
+        let cache_keys: Vec<String> = conn
+            .smembers(tag.redis_key())
+            .await
             .context("Failed to list cache keys by tag")?;
 
         Ok(cache_keys)
@@ -225,7 +267,9 @@ impl RedisAttachmentStore {
             pipe.srem(tag.redis_key(), &cache_key);
         }
 
-        let _: () = pipe.query_async(&mut conn).await
+        let _: () = pipe
+            .query_async(&mut conn)
+            .await
             .context("Failed to delete attachment record")?;
 
         debug!("Deleted attachment record with locator: {:?}", locator);
@@ -237,7 +281,9 @@ impl RedisAttachmentStore {
         let mut conn = self.get_connection().await?;
         let key = Self::record_key(locator);
 
-        let exists: bool = conn.hexists(&key, "data").await
+        let exists: bool = conn
+            .hexists(&key, "data")
+            .await
             .context("Failed to check if attachment record exists")?;
 
         Ok(exists)
@@ -247,20 +293,27 @@ impl RedisAttachmentStore {
     pub async fn count_by_tag(&self, tag: AttachmentTag) -> Result<usize> {
         let mut conn = self.get_connection().await?;
 
-        let count: usize = conn.scard(tag.redis_key()).await
+        let count: usize = conn
+            .scard(tag.redis_key())
+            .await
             .context("Failed to count attachment records by tag")?;
 
         Ok(count)
     }
 
     /// Get all tags that contain a specific locator
-    pub async fn get_tags_for_locator(&self, locator: &AttachmentLocator) -> Result<Vec<AttachmentTag>> {
+    pub async fn get_tags_for_locator(
+        &self,
+        locator: &AttachmentLocator,
+    ) -> Result<Vec<AttachmentTag>> {
         let mut conn = self.get_connection().await?;
         let cache_key = locator.cache_key();
         let mut tags = Vec::new();
 
         for tag in AttachmentTag::all_tags() {
-            let is_member: bool = conn.sismember(tag.redis_key(), &cache_key).await
+            let is_member: bool = conn
+                .sismember(tag.redis_key(), &cache_key)
+                .await
                 .context("Failed to check tag membership")?;
 
             if is_member {
@@ -299,3 +352,4 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
 
     store_guard.clone()
 }
+

@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use crate::attachments::types::RawAttachment;
+use crate::attachments::RawAttachment;
 use crate::types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
 use crate::utils::progress_reporter::{log_completion_stats, start_progress_reporter};
 use aws_sdk_s3::Client;

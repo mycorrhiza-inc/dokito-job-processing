@@ -6,9 +6,45 @@ use non_empty_string::NonEmptyString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
-use crate::jurisdiction_schema_mapping::FixedJurisdiction;
+use crate::{jurisdiction_schema_mapping::FixedJurisdiction, types::raw::JurisdictionInfo};
+
+// Legacy attachment types (for S3 compatibility)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, JsonSchema)]
+pub enum AttachmentTextQuality {
+    #[serde(rename = "low")]
+    Low,
+    #[serde(rename = "high")]
+    High,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+pub struct RawAttachmentText {
+    pub quality: AttachmentTextQuality,
+    pub language: NonEmptyString,
+    pub text: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone)]
+pub struct RawAttachment {
+    pub hash: Blake2bHash,
+    pub jurisdiction_info: JurisdictionInfo,
+    pub name: NonEmptyString,
+    pub extension: FileExtension,
+    pub text_objects: Vec<RawAttachmentText>,
+    pub date_added: chrono::DateTime<Utc>,
+    pub date_updated: chrono::DateTime<Utc>,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub extra_metadata: HashMap<String, String>,
+    #[serde(default)]
+    pub file_size_bytes: u64,
+}
+
+// Next-generation attachment types
 
 /// Attachment locator that provides stable cache keys
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, JsonSchema)]
@@ -22,10 +58,8 @@ impl AttachmentLocator {
     pub fn cache_key(&self) -> String {
         match self {
             AttachmentLocator::Url(url) => {
-                let mut hasher = Sha256::new();
-                hasher.update(url.as_bytes());
-                let url_hash = hex::encode(hasher.finalize());
-                format!("url:{}", url_hash)
+                // Moving this so that the url is directly used to improve debugability
+                format!("url:{}", url)
             }
         }
     }
@@ -101,8 +135,7 @@ impl AttachmentRecord {
 
     /// Get how long the current version has existed
     pub fn current_version_age(&self) -> Option<chrono::Duration> {
-        self.current_version()
-            .map(|v| Utc::now() - v.first_seen_at)
+        self.current_version().map(|v| Utc::now() - v.first_seen_at)
     }
 
     /// Get how long since the current version was last checked

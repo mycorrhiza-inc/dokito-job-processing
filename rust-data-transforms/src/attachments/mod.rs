@@ -5,7 +5,11 @@ pub mod tags;
 pub mod types;
 
 // Core attachment system exports
-pub use types::{RawAttachment, RawAttachmentText, AttachmentTextQuality, AttachmentLocator, AttachmentRecord, AttachmentVersion};
-pub use tags::AttachmentTag;
-pub use redis_store::{RedisAttachmentStore, get_redis_store};
 pub use downloading_logic::{AttachmentProcessor, OpenscrapersExtraData};
+pub use redis_store::{RedisAttachmentStore, get_redis_store};
+pub use tags::AttachmentTag;
+pub use types::{
+    AttachmentLocator, AttachmentRecord, AttachmentTextQuality, AttachmentVersion, RawAttachment,
+    RawAttachmentText,
+};
+

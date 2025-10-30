@@ -6,7 +6,7 @@ use mycorrhiza_common::tasks::{ExecuteUserTask, display_error_as_json};
 use std::collections::BTreeMap;
 use tracing::warn;
 
-use crate::attachments::types::RawAttachment;
+use crate::attachments::RawAttachment;
 
 pub type AttachIndex = BTreeMap<String, RawAttachment>;
 
