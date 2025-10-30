@@ -25,14 +25,14 @@ pub async fn cache_attachment(_url: &str, _attachment: &RawAttachment) -> Result
 /// Regenerate attachment index - now redirects to v2 system
 pub async fn regenrate_url_attach_index() -> anyhow::Result<()> {
     warn!("regenrate_url_attach_index is deprecated");
-    warn!("Use V2AttachmentProcessor and populate from PostgreSQL instead");
+    warn!("Use AttachmentProcessor and populate from PostgreSQL instead");
     Ok(())
 }
 
 /// Upload provided attachment index - now redirects to v2 system
 pub async fn upload_provided_attachment_index(_attach_index: AttachIndex) -> anyhow::Result<()> {
     warn!("upload_provided_attachment_index is deprecated");
-    warn!("Use V2AttachmentProcessor and populate from PostgreSQL instead");
+    warn!("Use AttachmentProcessor and populate from PostgreSQL instead");
     Ok(())
 }
 

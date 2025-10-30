@@ -1,21 +1,11 @@
 //! Next-generation attachment system with Redis storage and history tracking
-pub mod downloading;
+pub mod downloading_logic;
+pub mod redis_store;
 pub mod tags;
 pub mod types;
 
-// V2 attachment system modules
-pub mod v2_types;
-pub mod v2_redis_store;
-pub mod v2_downloading;
-
-// Legacy types for S3 compatibility
-pub use types::{RawAttachment, RawAttachmentText, AttachmentTextQuality};
+// Core attachment system exports
+pub use types::{RawAttachment, RawAttachmentText, AttachmentTextQuality, AttachmentLocator, AttachmentRecord, AttachmentVersion};
 pub use tags::AttachmentTag;
-
-// Legacy downloading functionality (still needed by processing layer)
-pub use downloading::{OpenscrapersExtraData, DirectAttachmentProcessInfo, DirectAttachmentReturnInfo, process_attachment_with_direct_request};
-
-// V2 system exports
-pub use v2_types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
-pub use v2_redis_store::{V2RedisAttachmentStore, get_v2_redis_store};
-pub use v2_downloading::{V2AttachmentProcessor, V2OpenscrapersExtraData};
+pub use redis_store::{RedisAttachmentStore, get_redis_store};
+pub use downloading_logic::{AttachmentProcessor, OpenscrapersExtraData};

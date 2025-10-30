@@ -2,7 +2,7 @@ use crate::data_processing_traits::{
     DownloadIncomplete, ProcessFrom, Revalidate, RevalidationOutcome,
 };
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::processing::attachments::OpenscrapersExtraData;
+use crate::attachments::OpenscrapersExtraData;
 use crate::s3_stuff::{DocketAddress, download_openscrapers_object, make_s3_client, upload_object};
 use crate::types::raw::JurisdictionInfo;
 use crate::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
@@ -15,7 +15,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-pub mod attachments;
+// pub mod attachments; // Removed - functionality moved to main attachments module
 pub mod file_fetching;
 pub mod llm_prompts;
 pub mod match_raw_processed;

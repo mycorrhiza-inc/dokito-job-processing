@@ -1,7 +1,7 @@
 //! Redis operations for the next-generation attachment system
 
 use super::tags::AttachmentTag;
-use super::v2_types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
+use super::types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
 use anyhow::{Context, Result};
 use redis::{AsyncCommands, Client};
 use serde_json;
@@ -12,13 +12,13 @@ use tracing::{debug, warn};
 
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 
-/// Redis store for v2 AttachmentRecord data with tag-based organization
+/// Redis store for AttachmentRecord data with tag-based organization
 #[derive(Clone)]
-pub struct V2RedisAttachmentStore {
+pub struct RedisAttachmentStore {
     client: Client,
 }
 
-impl V2RedisAttachmentStore {
+impl RedisAttachmentStore {
     /// Create a new Redis attachment store
     pub fn new() -> Result<Self> {
         let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
@@ -273,16 +273,16 @@ impl V2RedisAttachmentStore {
 }
 
 /// Global Redis store instance (following the pattern from existing code)
-static V2_REDIS_STORE: OnceLock<Mutex<Option<V2RedisAttachmentStore>>> = OnceLock::new();
+static REDIS_STORE: OnceLock<Mutex<Option<RedisAttachmentStore>>> = OnceLock::new();
 
-/// Get or create the global v2 Redis store instance
-pub async fn get_v2_redis_store() -> Option<V2RedisAttachmentStore> {
-    let store_mutex = V2_REDIS_STORE.get_or_init(|| Mutex::new(None));
+/// Get or create the global Redis store instance
+pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
+    let store_mutex = REDIS_STORE.get_or_init(|| Mutex::new(None));
     let mut store_guard = store_mutex.lock().await;
 
     // Initialize store if not already done
     if store_guard.is_none() {
-        match V2RedisAttachmentStore::new() {
+        match RedisAttachmentStore::new() {
             Ok(store) => {
                 // Test the connection
                 if let Ok(mut conn) = store.get_connection().await {
@@ -291,7 +291,7 @@ pub async fn get_v2_redis_store() -> Option<V2RedisAttachmentStore> {
                 }
             }
             Err(e) => {
-                warn!("Failed to create v2 Redis store: {}", e);
+                warn!("Failed to create Redis store: {}", e);
                 return None;
             }
         }

@@ -1,8 +1,8 @@
 //! Next-generation attachment downloading with history tracking
 
 use super::tags::AttachmentTag;
-use super::v2_redis_store::V2RedisAttachmentStore;
-use super::v2_types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
+use super::redis_store::RedisAttachmentStore;
+use super::types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
 use crate::data_processing_traits::RevalidationOutcome;
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::file_fetching::{FileDownloadError, FileDownloadResult, InternetFileFetch};
@@ -28,22 +28,22 @@ use anyhow::Result;
 const ATTACHMENT_DOWNLOAD_TRIES: usize = 2;
 const DOWNLOAD_RETRY_DELAY_SECONDS: u64 = 2;
 
-/// Enhanced extra data for v2 attachment processing
+/// Extra data for attachment processing
 #[derive(Clone)]
-pub struct V2OpenscrapersExtraData {
+pub struct OpenscrapersExtraData {
     pub s3_client: S3Client,
     pub jurisdiction_info: JurisdictionInfo,
     pub fixed_jurisdiction: FixedJurisdiction,
 }
 
-/// V2 implementation of DownloadIncomplete using the new attachment system
-pub struct V2AttachmentProcessor;
+/// Implementation of DownloadIncomplete using the new attachment system
+pub struct AttachmentProcessor;
 
-impl V2AttachmentProcessor {
-    /// Process attachment download with v2 system
+impl AttachmentProcessor {
+    /// Process attachment download with attachment system
     pub async fn download_incomplete(
         attachment: &mut ProcessedGenericAttachment,
-        extra_data: V2OpenscrapersExtraData,
+        extra_data: OpenscrapersExtraData,
     ) -> anyhow::Result<RevalidationOutcome> {
         if attachment.hash.is_some() {
             return Ok(RevalidationOutcome::NoChanges);
@@ -55,8 +55,8 @@ impl V2AttachmentProcessor {
         let pool = get_dokito_pool().await?;
         let locator = AttachmentLocator::Url(attachment.url.clone());
 
-        // Check v2 Redis cache first
-        if let Some(cached_record) = lookup_attachment_from_v2_redis(&locator).await {
+        // Check Redis cache first
+        if let Some(cached_record) = lookup_attachment_from_redis(&locator).await {
             if let Some(current_version) = cached_record.current_version() {
                 attachment.hash = Some(current_version.content_hash);
                 let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
@@ -66,7 +66,7 @@ impl V2AttachmentProcessor {
                 )
                 .await?;
 
-                // Mark as checked in v2 system
+                // Mark as checked in system
                 if let Err(e) = mark_attachment_checked(&locator).await {
                     warn!("Failed to mark attachment as checked: {}", e);
                 }
@@ -75,7 +75,7 @@ impl V2AttachmentProcessor {
             }
         }
 
-        debug!(url=%attachment.url, "Downloading attachment file with v2 system");
+        debug!(url=%attachment.url, "Downloading attachment file with attachment system");
         let extension = &attachment.document_extension;
 
         let download_start = Instant::now();
@@ -87,7 +87,7 @@ impl V2AttachmentProcessor {
         let download_time_seconds = Instant::now().duration_since(download_start).as_secs_f64();
         let upload_start = Instant::now();
         let hash = Blake2bHash::from_bytes(&file_contents);
-        debug!(%hash, url=%attachment.url, "Successfully downloaded file with v2 system");
+        debug!(%hash, url=%attachment.url, "Successfully downloaded file with attachment system");
 
         let mut metadata = HashMap::new();
         if let Some(server_name) = server_filename {
@@ -134,30 +134,30 @@ impl V2AttachmentProcessor {
             warn!(%err, url=%attachment.url, %hash, "Updating attachment hash in postgres encountered an error");
         }
 
-        // Store in v2 Redis system
-        if let Err(err) = store_attachment_in_v2_redis(&locator, extra_data.fixed_jurisdiction, version).await {
-            warn!(%err, url=%attachment.url, %hash, "Failed to store attachment in v2 Redis system");
+        // Store in Redis system
+        if let Err(err) = store_attachment_in_redis(&locator, extra_data.fixed_jurisdiction, version).await {
+            warn!(%err, url=%attachment.url, %hash, "Failed to store attachment in Redis system");
         }
 
         let upload_time_seconds = Instant::now().duration_since(upload_start).as_secs_f64();
-        info!(%hash, url=%attachment.url, %download_time_seconds, %upload_time_seconds, "Successfully downloaded attachment with v2 system");
+        info!(%hash, url=%attachment.url, %download_time_seconds, %upload_time_seconds, "Successfully downloaded attachment with attachment system");
         Ok(RevalidationOutcome::DidChange)
     }
 }
 
-/// Lookup attachment from v2 Redis system
-async fn lookup_attachment_from_v2_redis(locator: &AttachmentLocator) -> Option<AttachmentRecord> {
-    let store = V2RedisAttachmentStore::new().ok()?;
+/// Lookup attachment from Redis system
+async fn lookup_attachment_from_redis(locator: &AttachmentLocator) -> Option<AttachmentRecord> {
+    let store = RedisAttachmentStore::new().ok()?;
     store.get(locator).await.ok().flatten()
 }
 
-/// Store attachment in v2 Redis system
-async fn store_attachment_in_v2_redis(
+/// Store attachment in Redis system
+async fn store_attachment_in_redis(
     locator: &AttachmentLocator,
     jurisdiction: FixedJurisdiction,
     version: AttachmentVersion,
 ) -> Result<()> {
-    let store = V2RedisAttachmentStore::new()?;
+    let store = RedisAttachmentStore::new()?;
 
     // Check if record already exists
     if let Some(mut existing_record) = store.get(locator).await? {
@@ -187,9 +187,9 @@ async fn store_attachment_in_v2_redis(
     Ok(())
 }
 
-/// Mark attachment as checked in v2 system
+/// Mark attachment as checked in system
 async fn mark_attachment_checked(locator: &AttachmentLocator) -> Result<()> {
-    let store = V2RedisAttachmentStore::new()?;
+    let store = RedisAttachmentStore::new()?;
     store.mark_checked(locator).await
 }
 
