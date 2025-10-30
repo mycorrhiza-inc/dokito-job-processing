@@ -1,98 +1,180 @@
+//! Next-generation attachment types with stable cache keys and history tracking
+
 use chrono::{DateTime, Utc};
 use mycorrhiza_common::{file_extension::FileExtension, hash::Blake2bHash};
 use non_empty_string::NonEmptyString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Display};
-use uuid::Uuid;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 
-use crate::{jurisdiction_schema_mapping::FixedJurisdiction, types::raw::JurisdictionInfo};
+use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, JsonSchema)]
-pub enum AttachmentTextQuality {
-    #[serde(rename = "low")]
-    Low,
-    #[serde(rename = "high")]
-    High,
-}
-#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
-pub struct RawAttachmentText {
-    pub quality: AttachmentTextQuality,
-    pub language: NonEmptyString,
-    pub text: String,
-    pub timestamp: DateTime<Utc>,
-}
-
-#[derive(Serialize, Deserialize, Debug, JsonSchema, Clone)]
-pub struct RawAttachment {
-    pub hash: Blake2bHash,
-    pub jurisdiction_info: JurisdictionInfo,
-    pub name: NonEmptyString,
-    pub extension: FileExtension,
-    pub text_objects: Vec<RawAttachmentText>,
-    pub date_added: chrono::DateTime<Utc>,
-    pub date_updated: chrono::DateTime<Utc>,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub extra_metadata: HashMap<String, String>,
-    #[serde(default)]
-    pub file_size_bytes: u64,
-}
-
-// So part of the reason I am wanting to use this kinda weird method for calculating the unique
-// location of an attachment is because we want to support multiple kinds of sources of
-// attachments, and because we are dealing with government documents, we are going to have to deal
-// with things that are not publicly availible but still have a unique location. I dont know what
-// of the following we could support, I am listing them as pure hypotheticals right now
-// 1) Attachments publicly availible on a government website, accessed via a specific URL.
-// 2) Attachments acessible in an application, but require some kind of specific navigation with a
-//    playwright browser and or a specific entry of a credential at a previous point.
-// 3) Documents gotten via a public records request like FOIA, but are otherwise not availible
-//    publicly.
-// 4) Government documents that exist, but have some kind of copyright protection or other
-//    confidentiality clause that prevents them from being exhibited publicly.
-// However, right now I have no clue what of the following applications this attachment system is
-// going to handle, and over the next 8 months I know for certain its only going to handle the URL
-// encoding methodology, but the entire system with redis and attachment hashes should still work.
-//
-// Currently the thing I was thinking about is implementing a to_string method for the
-// UniversalAttachmentLocator. That would take a URL type, then convert it to url_{url_string}, and
-// as a catch all for other methods it could do the following:
-// 1) convert the UniversalAttachmentLocator to a Vec<u8> using RKYV (to keep the list of bytes as
-//    small as possible)
-// 2) base64 encode the list of bytes as a string
-// 3) output the following enum_{base64_encoded_rkyv_bytes}
-// But I want to know your thoughts on other ways this could be handled. Be brutally honest, does
-// this approach not work?
-
-pub enum UniversalAttachmentLocator {
+/// Attachment locator that provides stable cache keys
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, JsonSchema)]
+pub enum AttachmentLocator {
+    /// Public URL attachment
     Url(String),
 }
 
-impl Display for UniversalAttachmentLocator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl AttachmentLocator {
+    /// Generate a stable cache key that won't change when enum variants are added
+    pub fn cache_key(&self) -> String {
         match self {
-            UniversalAttachmentLocator::Url(url_content) => write!(f, "url_{url_content}"),
+            AttachmentLocator::Url(url) => {
+                let mut hasher = Sha256::new();
+                hasher.update(url.as_bytes());
+                let url_hash = hex::encode(hasher.finalize());
+                format!("url:{}", url_hash)
+            }
+        }
+    }
+
+    /// Get the raw URL string if this is a URL locator
+    pub fn as_url(&self) -> Option<&str> {
+        match self {
+            AttachmentLocator::Url(url) => Some(url),
         }
     }
 }
 
-// Some hypothetical changes to the way that raw attachments are stored and handled.
-pub struct RawAttachmentMetadata {
-    pub url: UniversalAttachmentLocator,
-    pub current_file_hash: Option<Blake2bHash>,
-    pub current_text_hash: Option<Blake2bHash>,
-    pub text_generation_time: Option<DateTime<Utc>>,
-    pub extension: FileExtension,
-    pub last_queried_time: Option<DateTime<Utc>>,
-    pub fixed_jurisdiction: FixedJurisdiction,
-    pub history: Vec<RawAttachmentHistoryPoint>,
+/// Complete attachment record with history tracking
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+pub struct AttachmentRecord {
+    /// How to locate this attachment
+    pub locator: AttachmentLocator,
+
+    /// Jurisdiction this attachment belongs to
+    pub jurisdiction: FixedJurisdiction,
+
+    /// Version history (head of vec is current version)
+    pub history: Vec<AttachmentVersion>,
+
+    /// When this attachment was first discovered
+    pub created_at: DateTime<Utc>,
+
+    /// When this record was last modified
+    pub updated_at: DateTime<Utc>,
 }
 
-pub struct RawAttachmentHistoryPoint {
-    pub first_queried_time: DateTime<Utc>,
-    pub file_hash: Blake2bHash,
-    pub file_text_hash: Option<Blake2bHash>,
-    pub text_generation_time: Option<DateTime<Utc>>,
+impl AttachmentRecord {
+    /// Create a new attachment record
+    pub fn new(locator: AttachmentLocator, jurisdiction: FixedJurisdiction) -> Self {
+        let now = Utc::now();
+        Self {
+            locator,
+            jurisdiction,
+            history: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Get the current (most recent) version
+    pub fn current_version(&self) -> Option<&AttachmentVersion> {
+        self.history.last()
+    }
+
+    /// Get the current version mutably
+    pub fn current_version_mut(&mut self) -> Option<&mut AttachmentVersion> {
+        self.history.last_mut()
+    }
+
+    /// Add a new version to the history
+    pub fn add_version(&mut self, version: AttachmentVersion) {
+        self.history.push(version);
+        self.updated_at = Utc::now();
+    }
+
+    /// Update the last_checked_at time for the current version
+    pub fn mark_checked(&mut self) {
+        if let Some(current) = self.current_version_mut() {
+            current.last_checked_at = Utc::now();
+            self.updated_at = Utc::now();
+        }
+    }
+
+    /// Check if this attachment has been downloaded (has at least one version)
+    pub fn is_downloaded(&self) -> bool {
+        !self.history.is_empty()
+    }
+
+    /// Get how long the current version has existed
+    pub fn current_version_age(&self) -> Option<chrono::Duration> {
+        self.current_version()
+            .map(|v| Utc::now() - v.first_seen_at)
+    }
+
+    /// Get how long since the current version was last checked
+    pub fn time_since_last_check(&self) -> Option<chrono::Duration> {
+        self.current_version()
+            .map(|v| Utc::now() - v.last_checked_at)
+    }
+}
+
+/// A specific version of an attachment's content
+#[derive(Serialize, Deserialize, Debug, Clone, JsonSchema)]
+pub struct AttachmentVersion {
+    /// Hash of the file content
+    pub content_hash: Blake2bHash,
+
+    /// Hash of extracted text (if any)
+    pub text_hash: Option<Blake2bHash>,
+
+    /// When this version was first discovered
+    pub first_seen_at: DateTime<Utc>,
+
+    /// When this version was last verified to still be current
+    pub last_checked_at: DateTime<Utc>,
+
+    /// Size of the file in bytes
+    pub file_size_bytes: u64,
+
+    /// Display name of the attachment
+    pub name: NonEmptyString,
+
+    /// File extension
+    pub extension: FileExtension,
+
+    /// Additional metadata (server filename, content-type, etc.)
+    pub metadata: HashMap<String, String>,
+}
+
+impl AttachmentVersion {
+    /// Create a new attachment version
+    pub fn new(
+        content_hash: Blake2bHash,
+        file_size_bytes: u64,
+        name: NonEmptyString,
+        extension: FileExtension,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            content_hash,
+            text_hash: None,
+            first_seen_at: now,
+            last_checked_at: now,
+            file_size_bytes,
+            name,
+            extension,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Set the text hash for this version
+    pub fn with_text_hash(mut self, text_hash: Blake2bHash) -> Self {
+        self.text_hash = Some(text_hash);
+        self
+    }
+
+    /// Add metadata to this version
+    pub fn with_metadata(mut self, key: String, value: String) -> Self {
+        self.metadata.insert(key, value);
+        self
+    }
+
+    /// Check if this version is the same content as another
+    pub fn same_content(&self, other: &AttachmentVersion) -> bool {
+        self.content_hash == other.content_hash
+    }
 }
