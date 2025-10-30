@@ -1,7 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use rust_data_transforms::indexes::attachment_url_index::{regenrate_url_attach_index, AttachIndex, upload_provided_attachment_index, lookup_hash_from_url};
-use rust_data_transforms::indexes::s3_storage_and_saving::generate_attachment_url_index;
+use rust_data_transforms::indexes::attachment_url_index::regenrate_url_attach_index;
+use rust_data_transforms::attachments::{AttachmentLocator, get_redis_store};
+// s3_storage_and_saving module removed - use Redis-based attachment system instead
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recreate_schema;
@@ -39,56 +40,11 @@ async fn list_docket_ids_for_jurisdiction(fixed_jur: FixedJurisdiction) -> Resul
     Ok(docket_ids.into_iter().map(|d| d.docket_govid).collect())
 }
 
-async fn generate_and_upload_attachment_index() -> Result<()> {
-    tracing::info!("Starting attachment index generation");
+// generate_and_upload_attachment_index removed - use Redis-based attachment system instead
 
-    // Generate the attachment index
-    let attach_index = generate_attachment_url_index().await?;
-    tracing::info!(
-        "Generated attachment index with {} entries",
-        attach_index.len()
-    );
+// read_attachment_index_from_stdin removed - use Redis-based attachment system instead
 
-    // Upload to Redis and backup to S3 (this function handles both)
-    regenrate_url_attach_index().await?;
-    tracing::info!("Successfully uploaded attachment index to Redis and S3");
-
-    // Convert to JSON and print to stdout for extra safety
-    let json_output = serde_json::to_string_pretty(&attach_index)?;
-    println!("{}", json_output);
-
-    tracing::info!("Attachment index generation and upload completed successfully");
-    Ok(())
-}
-
-async fn read_attachment_index_from_stdin() -> Result<AttachIndex> {
-    tracing::info!("Reading attachment index from stdin");
-
-    let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer)?;
-
-    if buffer.trim().is_empty() {
-        return Err(anyhow::anyhow!("No data provided via stdin"));
-    }
-
-    let attach_index: AttachIndex = serde_json::from_str(&buffer)?;
-    tracing::info!("Successfully parsed attachment index with {} entries", attach_index.len());
-
-    Ok(attach_index)
-}
-
-async fn upload_attachment_index_from_stdin() -> Result<()> {
-    tracing::info!("Starting attachment index upload from stdin");
-
-    // Read and parse the attachment index from stdin
-    let attach_index = read_attachment_index_from_stdin().await?;
-
-    // Upload to Redis and backup to S3 using the existing infrastructure
-    upload_provided_attachment_index(attach_index).await?;
-
-    tracing::info!("Successfully uploaded attachment index from stdin to Redis and S3");
-    Ok(())
-}
+// upload_attachment_index_from_stdin removed - use Redis-based attachment system instead
 
 async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -> Result<()> {
     let pool = get_dokito_pool()
@@ -113,9 +69,15 @@ async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -> Re
         return Ok(());
     }
 
+    // Get Redis store for the new attachment system
+    let redis_store = get_redis_store().await
+        .ok_or_else(|| anyhow::anyhow!("Failed to get Redis attachment store"))?;
+
     // Process attachments concurrently with a limit of 20 at a time
     let update_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let processed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    use futures_util::{StreamExt, stream};
 
     stream::iter(attachments)
         .map(|attachment| {
@@ -123,6 +85,7 @@ async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -> Re
             let pg_schema = pg_schema;
             let update_count = update_count.clone();
             let processed_count = processed_count.clone();
+            let redis_store = &redis_store;
 
             async move {
                 processed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -132,10 +95,10 @@ async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -> Re
                     tracing::info!("Processed {} attachments so far", current_processed);
                 }
 
-                // Look up the hash from Redis
-                if let Some(raw_attachment) = lookup_hash_from_url(&attachment.attachment_url).await {
-                    let hash_string = raw_attachment.hash.to_string();
-                    if !hash_string.is_empty() {
+                // Look up the attachment record from Redis using URL
+                if let Ok(Some(record)) = redis_store.get_by_url(&attachment.attachment_url).await {
+                    if let Some(current_version) = record.current_version() {
+                        let hash_string = current_version.content_hash.to_string();
                         // Update the database with the found hash
                         match sqlx::query(&format!(
                             "UPDATE {}.attachments SET file_hash_if_downloaded = $1 WHERE uuid = $2",
@@ -155,10 +118,10 @@ async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -> Re
                             }
                         }
                     } else {
-                        tracing::debug!("Found attachment in Redis but hash is empty for URL: {}", attachment.attachment_url);
+                        tracing::debug!("Found attachment in Redis but no current version for URL: {}", attachment.attachment_url);
                     }
                 } else {
-                    tracing::debug!("No hash found in Redis for URL: {}", attachment.attachment_url);
+                    tracing::debug!("No attachment record found in Redis for URL: {}", attachment.attachment_url);
                 }
             }
         })
@@ -198,10 +161,7 @@ enum Commands {
         #[arg(long, value_enum, help = "Fixed jurisdiction to list docket IDs for")]
         fixed_jur: FixedJurisdiction,
     },
-    /// Generate attachment URL index, upload to Redis, backup to S3, and print JSON to stdout
-    GenerateAttachmentIndex,
-    /// Upload attachment index from JSON provided via stdin to Redis and S3
-    UploadAttachmentIndexFromStdin,
+    // Attachment index commands removed - use Redis-based attachment system instead
     /// Update attachment hashes from Redis cache for attachments missing file_hash_if_downloaded
     UpdateAttachmentHashesFromRedis {
         #[arg(long, value_enum, help = "Fixed jurisdiction to update attachment hashes for")]
@@ -244,12 +204,7 @@ async fn main() -> Result<()> {
             let json_output = serde_json::to_string(&docket_ids)?;
             println!("{}", json_output);
         }
-        Commands::GenerateAttachmentIndex => {
-            generate_and_upload_attachment_index().await?;
-        }
-        Commands::UploadAttachmentIndexFromStdin => {
-            upload_attachment_index_from_stdin().await?;
-        }
+        // Removed attachment index commands - use Redis-based attachment system instead
         Commands::UpdateAttachmentHashesFromRedis { fixed_jur } => {
             tracing::info!(
                 "Starting attachment hash update from Redis for jurisdiction: {}",
