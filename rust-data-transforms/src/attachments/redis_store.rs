@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 /// Redis store for RawAttachment data with tag-based organization
+#[derive(Clone)]
 pub struct RedisAttachmentStore {
     client: Client,
 }
@@ -66,7 +67,7 @@ impl RedisAttachmentStore {
         // Add URL hash to the tag set
         pipe.sadd(tag.redis_key(), &url_hash);
 
-        pipe.query_async(&mut conn).await
+        let _: () = pipe.query_async(&mut conn).await
             .context("Failed to store attachment")?;
 
         debug!("Stored attachment with URL: {} and tag: {}", attachment.url, tag);
@@ -96,11 +97,13 @@ impl RedisAttachmentStore {
         let mut conn = self.get_connection().await?;
 
         // Use SORT command with GET pattern to fetch all attachment data in one Redis call
-        let results: Vec<String> = conn.sort(
-            tag.redis_key(),
-            redis::SortOptions::default()
-                .get("raw_attachment:*->data")
-        ).await.context("Failed to get attachments by tag")?;
+        let results: Vec<String> = redis::cmd("SORT")
+            .arg(tag.redis_key())
+            .arg("GET")
+            .arg("raw_attachment:*->data")
+            .query_async(&mut conn)
+            .await
+            .context("Failed to get attachments by tag")?;
 
         let mut attachments = Vec::new();
 
@@ -138,7 +141,7 @@ impl RedisAttachmentStore {
         // Add to new tag
         pipe.sadd(to_tag.redis_key(), &url_hash);
 
-        pipe.query_async(&mut conn).await
+        let _: () = pipe.query_async(&mut conn).await
             .context("Failed to change tag")?;
 
         debug!("Changed tag for URL: {} from {} to {}", url, from_tag, to_tag);
@@ -173,7 +176,7 @@ impl RedisAttachmentStore {
             pipe.srem(tag.redis_key(), &url_hash);
         }
 
-        pipe.query_async(&mut conn).await
+        let _: () = pipe.query_async(&mut conn).await
             .context("Failed to delete attachment")?;
 
         debug!("Deleted attachment with URL: {}", url);

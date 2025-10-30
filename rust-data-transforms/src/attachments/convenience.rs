@@ -4,7 +4,7 @@ use super::{AttachmentTag, RedisAttachmentStore};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::types::attachments::RawAttachment;
 use anyhow::Result;
-use tracing::{debug, warn};
+use tracing::warn;
 
 /// Store an attachment and mark it as undownloaded for the given jurisdiction
 pub async fn store_undownloaded_attachment(
