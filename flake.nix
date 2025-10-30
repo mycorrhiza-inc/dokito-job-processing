@@ -109,7 +109,9 @@
 
             # Set up Redis configuration for author caching
             export REDIS_DATA_DIR="$BINARY_EXECUTION_PATH/redis_data"
-            export REDIS_URL="redis://127.0.0.1:6379"
+            if [ -z "''${REDIS_URL:-}" ]; then
+              export REDIS_URL="redis://127.0.0.1:6379"
+            fi
           '';
 
           # Debug function that reads and displays the actual environment variables
@@ -130,13 +132,13 @@
 
             # Check Redis connectivity
             echo "🔍 Checking Redis connectivity..."
-            if ${pkgs.redis}/bin/redis-cli ping >/dev/null 2>&1; then
+            if ${pkgs.redis}/bin/redis-cli -u "''${REDIS_URL}" --tls ping >/dev/null 2>&1; then
               echo "✅ Redis server responsive"
-              echo "   Cache keys: $(${pkgs.redis}/bin/redis-cli dbsize 2>/dev/null || echo 'unknown')"
+              echo "   Cache keys: $(${pkgs.redis}/bin/redis-cli -u "''${REDIS_URL}" --tls dbsize 2>/dev/null || echo 'unknown')"
             else
               echo "❌ Redis server not responding"
               echo "   Author caching will be disabled"
-              echo "   To enable caching, run: nix run .#redis"
+              echo "   Check your REDIS_URL setting: $REDIS_URL"
             fi
             echo ""
 
@@ -163,7 +165,7 @@
             ${dokitoEnvDebug}
 
             # Execute the server
-            exec "${runnerModule.binaries.server}" "$@"
+            exec "${runnerModule.binaries.raw-server}" "$@"
           '';
 
           # Create a CLI wrapper that sets up environment variables and runs in CLI mode
@@ -174,7 +176,7 @@
             ${dokitoEnvDebug}
 
             # Execute the CLI
-            exec "${runnerModule.binaries.cli}" "$@"
+            exec "${runnerModule.binaries.raw-cli}" "$@"
           '';
 
           # Create a Redis server wrapper for author caching
