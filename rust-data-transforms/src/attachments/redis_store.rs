@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use redis::{AsyncCommands, Client};
 use serde_json;
 use std::env;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
@@ -18,12 +18,18 @@ pub struct RedisAttachmentStore {
     client: Client,
 }
 
+pub static REDIS_URL: LazyLock<String> = LazyLock::new(|| {
+    env::var("REDIS_URL")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "redis://127.0.0.1:6379".to_string())
+});
+
 impl RedisAttachmentStore {
     /// Create a new Redis attachment store
     pub fn new() -> Result<Self> {
-        let redis_url =
-            env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-        let client = Client::open(redis_url.as_str()).context("Failed to create Redis client")?;
+        let redis_url = &**REDIS_URL;
+        let client = Client::open(redis_url).context("Failed to create Redis client")?;
 
         Ok(Self { client })
     }

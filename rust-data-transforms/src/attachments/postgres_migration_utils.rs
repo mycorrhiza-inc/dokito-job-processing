@@ -1,12 +1,18 @@
 use anyhow::Result;
-use sqlx::FromRow;
-use uuid::Uuid;
-use mycorrhiza_common::hash::Blake2bHash;
 use mycorrhiza_common::file_extension::{FileExtension, StaticExtension};
+use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::NonEmptyString;
-use rust_data_transforms::attachments::{AttachmentLocator, AttachmentRecord, AttachmentVersion, AttachmentTag, RedisAttachmentStore};
+use rust_data_transforms::attachments::{
+    AttachmentLocator, AttachmentRecord, AttachmentTag, AttachmentVersion, RedisAttachmentStore,
+};
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
+use sqlx::FromRow;
+use uuid::Uuid;
+
+use crate::attachments::get_redis_store;
+use crate::jurisdiction_schema_mapping::FixedJurisdiction;
+use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 
 #[derive(FromRow)]
 struct PgAttachmentRecord {
@@ -32,7 +38,10 @@ pub async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -
         .map_err(|e| anyhow::anyhow!("Failed to get database pool: {}", e))?;
     let pg_schema = fixed_jur.get_postgres_schema_name();
 
-    tracing::info!("Querying attachments without hashes for jurisdiction: {}", pg_schema);
+    tracing::info!(
+        "Querying attachments without hashes for jurisdiction: {}",
+        pg_schema
+    );
 
     let attachments = sqlx::query_as::<_, PgAttachmentRecord>(&format!(
         "SELECT uuid, attachment_url FROM {}.attachments WHERE file_hash_if_downloaded = '' OR file_hash_if_downloaded IS NULL",
@@ -48,7 +57,8 @@ pub async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -
         return Ok(());
     }
 
-    let redis_store = rust_data_transforms::attachments::get_redis_store().await
+    let redis_store = get_redis_store()
+        .await
         .ok_or_else(|| anyhow::anyhow!("Failed to get Redis attachment store"))?;
 
     let update_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -122,9 +132,13 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
         .map_err(|e| anyhow::anyhow!("Failed to get database pool: {}", e))?;
     let pg_schema = fixed_jur.get_postgres_schema_name();
 
-    tracing::info!("Starting attachment migration to Redis for jurisdiction: {}", pg_schema);
+    tracing::info!(
+        "Starting attachment migration to Redis for jurisdiction: {}",
+        pg_schema
+    );
 
-    let redis_store = rust_data_transforms::attachments::get_redis_store().await
+    let redis_store = rust_data_transforms::attachments::get_redis_store()
+        .await
         .ok_or_else(|| anyhow::anyhow!("Failed to get Redis attachment store"))?;
 
     let attachments = sqlx::query_as::<_, PgAttachmentFull>(&format!(
@@ -195,20 +209,31 @@ async fn process_single_attachment(
     match existing_record {
         Some(mut record) => {
             if record.is_downloaded() {
-                tracing::debug!("Attachment {} already exists with history, skipping", pg_attachment.uuid);
+                tracing::debug!(
+                    "Attachment {} already exists with history, skipping",
+                    pg_attachment.uuid
+                );
                 return Ok(MigrationResult::Skipped);
             } else if !pg_attachment.file_hash_if_downloaded.trim().is_empty() {
-                let hash = pg_attachment.file_hash_if_downloaded.parse::<Blake2bHash>()
+                let hash = pg_attachment
+                    .file_hash_if_downloaded
+                    .parse::<Blake2bHash>()
                     .map_err(|e| anyhow::anyhow!("Invalid hash format in PG: {}", e))?;
 
                 let version = create_attachment_version_from_pg(pg_attachment, hash)?;
                 record.add_version(version);
 
                 redis_store.update(&record).await?;
-                tracing::debug!("Added version to existing attachment {}", pg_attachment.uuid);
+                tracing::debug!(
+                    "Added version to existing attachment {}",
+                    pg_attachment.uuid
+                );
                 return Ok(MigrationResult::Updated);
             } else {
-                tracing::debug!("Attachment {} exists in Redis but no hash in PG", pg_attachment.uuid);
+                tracing::debug!(
+                    "Attachment {} exists in Redis but no hash in PG",
+                    pg_attachment.uuid
+                );
                 return Ok(MigrationResult::Skipped);
             }
         }
@@ -218,14 +243,19 @@ async fn process_single_attachment(
             new_record.updated_at = pg_attachment.updated_at;
 
             if !pg_attachment.file_hash_if_downloaded.trim().is_empty() {
-                let hash = pg_attachment.file_hash_if_downloaded.parse::<Blake2bHash>()
+                let hash = pg_attachment
+                    .file_hash_if_downloaded
+                    .parse::<Blake2bHash>()
                     .map_err(|e| anyhow::anyhow!("Invalid hash format in PG: {}", e))?;
 
                 let version = create_attachment_version_from_pg(pg_attachment, hash)?;
                 new_record.add_version(version);
             }
 
-            let tag = AttachmentTag::new(fixed_jur, !pg_attachment.file_hash_if_downloaded.trim().is_empty());
+            let tag = AttachmentTag::new(
+                fixed_jur,
+                !pg_attachment.file_hash_if_downloaded.trim().is_empty(),
+            );
             redis_store.store(&new_record, tag).await?;
             tracing::debug!("Created new attachment record for {}", pg_attachment.uuid);
             return Ok(MigrationResult::Created);
@@ -238,7 +268,9 @@ fn create_attachment_version_from_pg(
     hash: Blake2bHash,
 ) -> Result<AttachmentVersion> {
     let extension = if !pg_attachment.attachment_file_extension.trim().is_empty() {
-        pg_attachment.attachment_file_extension.parse::<FileExtension>()
+        pg_attachment
+            .attachment_file_extension
+            .parse::<FileExtension>()
             .unwrap_or(FileExtension::Static(StaticExtension::Pdf))
     } else {
         let filename = if !pg_attachment.attachment_file_name.trim().is_empty() {
@@ -248,7 +280,8 @@ fn create_attachment_version_from_pg(
         };
 
         if let Some(ext) = filename.split('.').last() {
-            ext.parse::<FileExtension>().unwrap_or(FileExtension::Static(StaticExtension::Pdf))
+            ext.parse::<FileExtension>()
+                .unwrap_or(FileExtension::Static(StaticExtension::Pdf))
         } else {
             FileExtension::Static(StaticExtension::Pdf)
         }
@@ -265,12 +298,7 @@ fn create_attachment_version_from_pg(
             .map_err(|_| anyhow::anyhow!("Failed to create default name"))?
     };
 
-    let mut version = AttachmentVersion::new(
-        hash,
-        0,
-        name,
-        extension,
-    );
+    let mut version = AttachmentVersion::new(hash, 0, name, extension);
 
     version.first_seen_at = pg_attachment.created_at;
     version.last_checked_at = pg_attachment.updated_at;
