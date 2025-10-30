@@ -39,7 +39,10 @@ impl RedisAttachmentStore {
         self.client
             .get_multiplexed_async_connection()
             .await
-            .context("Failed to get Redis connection")
+            .map_err(|e| {
+                tracing::error!("Redis connection error details: {}", e);
+                anyhow::anyhow!("Failed to get Redis connection: {}", e)
+            })
     }
 
     /// Get the Redis key for storing attachment record data
@@ -344,9 +347,22 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
         match RedisAttachmentStore::new() {
             Ok(store) => {
                 // Test the connection
-                if let Ok(mut conn) = store.get_connection().await {
-                    let _: Result<String, _> = redis::cmd("PING").query_async(&mut conn).await;
-                    *store_guard = Some(store);
+                match store.get_connection().await {
+                    Ok(mut conn) => {
+                        match redis::cmd("PING").query_async::<()>(&mut conn).await {
+                            Ok(_) => {
+                                *store_guard = Some(store);
+                            }
+                            Err(e) => {
+                                warn!("Failed to ping Redis server: {}", e);
+                                return None;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to connect to Redis: {}", e);
+                        return None;
+                    }
                 }
             }
             Err(e) => {

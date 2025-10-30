@@ -1,8 +1,10 @@
 use anyhow::Result;
+use futures::future::join_all;
 use mycorrhiza_common::file_extension::{FileExtension, StaticExtension};
 use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::NonEmptyString;
 use sqlx::FromRow;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::attachments::{
@@ -18,7 +20,7 @@ struct PgAttachmentRecord {
     attachment_url: String,
 }
 
-#[derive(FromRow)]
+#[derive(FromRow, Clone)]
 pub struct PgAttachmentFull {
     pub uuid: Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -108,7 +110,7 @@ pub async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -
                 }
             }
         })
-        .buffer_unordered(20)
+        .buffer_unordered(30)
         .collect::<Vec<_>>()
         .await;
 
@@ -148,10 +150,14 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
 
     tracing::info!("Found {} attachments to migrate", attachments.len());
 
-    let mut created_count = 0;
-    let mut updated_count = 0;
-    let mut skipped_count = 0;
-    let mut error_count = 0;
+    let created_count = std::sync::atomic::AtomicUsize::new(0);
+    let updated_count = std::sync::atomic::AtomicUsize::new(0);
+    let skipped_count = std::sync::atomic::AtomicUsize::new(0);
+    let error_count = std::sync::atomic::AtomicUsize::new(0);
+
+    let simultanous_tasks = Semaphore::new(30);
+
+    let mut final_futures = Vec::new();
 
     for (index, pg_attachment) in attachments.iter().enumerate() {
         if index % 100 == 0 && index > 0 {
@@ -160,30 +166,41 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
 
         if pg_attachment.attachment_url.trim().is_empty() {
             tracing::debug!("Skipping attachment {} with empty URL", pg_attachment.uuid);
-            skipped_count += 1;
+            skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             continue;
         }
 
-        let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
-
-        match process_single_attachment(&redis_store, pg_attachment, &locator, fixed_jur).await {
-            Ok(MigrationResult::Created) => created_count += 1,
-            Ok(MigrationResult::Updated) => updated_count += 1,
-            Ok(MigrationResult::Skipped) => skipped_count += 1,
-            Err(e) => {
-                tracing::warn!("Failed to process attachment {}: {}", pg_attachment.uuid, e);
-                error_count += 1;
+        let future = async {
+            let _permit = simultanous_tasks.acquire().await;
+            let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
+            match process_single_attachment(&redis_store, pg_attachment, &locator, fixed_jur).await
+            {
+                Ok(MigrationResult::Created) => {
+                    created_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Ok(MigrationResult::Updated) => {
+                    updated_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Ok(MigrationResult::Skipped) => {
+                    skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to process attachment {}: {}", pg_attachment.uuid, e);
+                    error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
-        }
+        };
+        final_futures.push(future);
     }
+    join_all(final_futures).await;
 
     tracing::info!(
         "Migration completed for jurisdiction {}. Created: {}, Updated: {}, Skipped: {}, Errors: {}",
         pg_schema,
-        created_count,
-        updated_count,
-        skipped_count,
-        error_count
+        created_count.load(std::sync::atomic::Ordering::Relaxed),
+        updated_count.load(std::sync::atomic::Ordering::Relaxed),
+        skipped_count.load(std::sync::atomic::Ordering::Relaxed),
+        error_count.load(std::sync::atomic::Ordering::Relaxed)
     );
 
     Ok(())
