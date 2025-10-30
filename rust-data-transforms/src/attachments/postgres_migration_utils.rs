@@ -155,44 +155,59 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
     let skipped_count = std::sync::atomic::AtomicUsize::new(0);
     let error_count = std::sync::atomic::AtomicUsize::new(0);
 
-    let simultanous_tasks = Semaphore::new(30);
+    let block_size = 200;
 
-    let mut final_futures = Vec::new();
+    for (block_index, chunk) in attachments.chunks(block_size).enumerate() {
+        let simultanous_tasks_in_block = Semaphore::new(30);
+        let mut futures = Vec::new();
 
-    for (index, pg_attachment) in attachments.iter().enumerate() {
-        if index % 100 == 0 && index > 0 {
-            tracing::info!("Processed {} attachments so far", index);
-        }
-
-        if pg_attachment.attachment_url.trim().is_empty() {
-            tracing::debug!("Skipping attachment {} with empty URL", pg_attachment.uuid);
-            skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            continue;
-        }
-
-        let future = async {
-            let _permit = simultanous_tasks.acquire().await;
-            let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
-            match process_single_attachment(&redis_store, pg_attachment, &locator, fixed_jur).await
-            {
-                Ok(MigrationResult::Created) => {
-                    created_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                Ok(MigrationResult::Updated) => {
-                    updated_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                Ok(MigrationResult::Skipped) => {
-                    skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to process attachment {}: {}", pg_attachment.uuid, e);
-                    error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
+        for pg_attachment in chunk {
+            if pg_attachment.attachment_url.trim().is_empty() {
+                tracing::debug!("Skipping attachment {} with empty URL", pg_attachment.uuid);
+                skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                continue;
             }
-        };
-        final_futures.push(future);
+
+            let future = async {
+                let _permit = simultanous_tasks_in_block.acquire().await;
+                let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
+                match process_single_attachment(&redis_store, pg_attachment, &locator, fixed_jur)
+                    .await
+                {
+                    Ok(MigrationResult::Created) => {
+                        created_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Ok(MigrationResult::Updated) => {
+                        updated_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Ok(MigrationResult::Skipped) => {
+                        skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to process attachment {}: {}",
+                            pg_attachment.uuid,
+                            e
+                        );
+                        error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            };
+            futures.push(future);
+        }
+
+        join_all(futures).await;
+
+        tracing::info!(
+            "Completed block {} of {}. Running totals - Created: {}, Updated: {}, Skipped: {}, Errors: {}",
+            block_index + 1,
+            (attachments.len() + block_size - 1) / block_size,
+            created_count.load(std::sync::atomic::Ordering::Relaxed),
+            updated_count.load(std::sync::atomic::Ordering::Relaxed),
+            skipped_count.load(std::sync::atomic::Ordering::Relaxed),
+            error_count.load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
-    join_all(final_futures).await;
 
     tracing::info!(
         "Migration completed for jurisdiction {}. Created: {}, Updated: {}, Skipped: {}, Errors: {}",
