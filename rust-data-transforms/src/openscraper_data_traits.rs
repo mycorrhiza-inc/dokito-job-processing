@@ -13,7 +13,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::data_processing_traits::{ProcessFrom, Revalidate, RevalidationOutcome};
-use crate::indexes::attachment_url_index::lookup_hash_from_url;
+// lookup_hash_from_url removed - use Redis-based attachment system instead
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::processing::llm_prompts::{
     clean_up_organization_name_list, split_and_fix_organization_names_blob,
@@ -479,21 +479,8 @@ impl ProcessFrom<RawGenericAttachment> for ProcessedGenericAttachment {
         // Try to get hash from: 1) input, 2) cached, 3) URL cache
         let hash = (input.hash).or_else(|| cached.and_then(|v| v.hash));
 
-        let hash = if hash.is_none() && !input.url.is_empty() {
-            // Check URL cache for existing hash
-            if let Some(cached_attach) = lookup_hash_from_url(&input.url).await {
-                tracing::debug!(
-                    hash=%cached_attach.hash,
-                    url=%input.url,
-                    "Found cached hash for attachment URL during processing"
-                );
-                Some(cached_attach.hash)
-            } else {
-                None
-            }
-        } else {
-            hash
-        };
+        // URL cache lookup removed - use Redis-based attachment system instead
+        let hash = hash;
         let return_res = Self {
             object_uuid: uuid,
             index_in_filing: index_data.index,

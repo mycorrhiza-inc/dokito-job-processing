@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod attachments;
 pub mod case_worker;
 pub mod cli_input_types;
 pub mod data_processing_traits;

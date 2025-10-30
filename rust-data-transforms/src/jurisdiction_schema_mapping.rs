@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema, ValueEnum)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, JsonSchema, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum FixedJurisdiction {
     #[value(name = "new_york_puc")]

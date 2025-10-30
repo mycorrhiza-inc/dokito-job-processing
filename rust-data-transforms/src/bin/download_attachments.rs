@@ -3,7 +3,7 @@ use clap::Parser;
 use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use rust_data_transforms::data_processing_traits::DownloadIncomplete;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
-use rust_data_transforms::processing::attachments::OpenscrapersExtraData;
+use rust_data_transforms::attachments::OpenscrapersExtraData;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
 use serde_json;
 use std::io::{self, Read, Write};
