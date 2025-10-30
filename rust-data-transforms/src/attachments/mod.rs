@@ -9,7 +9,6 @@ pub use downloading_logic::{AttachmentProcessor, OpenscrapersExtraData};
 pub use redis_store::{RedisAttachmentStore, get_redis_store};
 pub use tags::AttachmentTag;
 pub use types::{
-    AttachmentLocator, AttachmentRecord, AttachmentTextQuality, AttachmentVersion, RawAttachment,
-    RawAttachmentText,
+    AttachmentLocator, AttachmentRecord, AttachmentVersion,
 };
 

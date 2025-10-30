@@ -5,7 +5,6 @@ use mycorrhiza_common::s3_generic::s3_uri::S3LocationWithCredentials;
 use non_empty_string::non_empty_string;
 use tracing::{debug, info};
 
-use crate::types::attachments::RawAttachment;
 use crate::types::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
 use crate::types::processed::ProcessedGenericDocket;
 use crate::types::raw::JurisdictionInfo;
@@ -13,18 +12,7 @@ use crate::types::raw::RawGenericDocket;
 use aws_sdk_s3::Client as S3Client;
 use mycorrhiza_common::hash::Blake2bHash;
 
-pub fn get_raw_attach_file_key(hash: Blake2bHash) -> String {
-    let key = format!("raw/file/{hash}");
-    debug!(%hash, "Generated raw attachment file key: {}", key);
-    key
-}
 
-impl CannonicalS3ObjectLocation for RawAttachment {
-    type AddressInfo = Blake2bHash;
-    fn generate_object_key(hash: &Self::AddressInfo) -> String {
-        format!("raw/metadata/{hash}.json")
-    }
-}
 
 pub struct DocketAddress {
     pub docket_govid: String,

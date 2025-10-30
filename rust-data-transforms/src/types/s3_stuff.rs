@@ -8,7 +8,7 @@ use mycorrhiza_common::s3_generic::fetchers_and_getters::{S3Addr, S3DirectoryAdd
 use non_empty_string::non_empty_string;
 use tracing::{debug, info};
 
-use crate::attachments::types::RawAttachment;
+use crate::attachments::RawAttachment;
 use crate::env_vars::{DIGITALOCEAN_S3, OPENSCRAPERS_S3_OBJECT_BUCKET};
 use crate::raw::JurisdictionInfo;
 use aws_sdk_s3::Client as S3Client;

@@ -1,7 +1,7 @@
 //! Next-generation attachment downloading with history tracking
 
-use super::tags::AttachmentTag;
 use super::redis_store::RedisAttachmentStore;
+use super::tags::AttachmentTag;
 use super::types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
 use crate::data_processing_traits::{DownloadIncomplete, RevalidationOutcome};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
@@ -11,11 +11,11 @@ use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use crate::types::processed::ProcessedGenericAttachment;
 use crate::types::raw::JurisdictionInfo;
 use aws_sdk_s3::Client as S3Client;
-use sqlx::prelude::FromRow;
 use chrono::Utc;
 use mycorrhiza_common::file_extension::FileExtension;
 use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::{NonEmptyString, non_empty_string};
+use sqlx::prelude::FromRow;
 // SQL functions are imported via the old downloading module
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -101,27 +101,26 @@ impl AttachmentProcessor {
             file_contents.len() as u64,
             name.clone(),
             extension.clone(),
-        ).with_metadata("download_time_seconds".to_string(), download_time_seconds.to_string());
-
-        // Add any additional metadata
-        let version = metadata.clone().into_iter().fold(version, |v, (k, val)| v.with_metadata(k, val));
-
-        // Ship to S3 (using existing S3 infrastructure)
-        let legacy_raw_attachment = create_legacy_raw_attachment_for_s3(
-            &extra_data,
-            hash,
-            &name,
-            extension,
-            file_contents.len() as u64,
-            &attachment.url,
-            &metadata,
+        )
+        .with_metadata(
+            "download_time_seconds".to_string(),
+            download_time_seconds.to_string(),
         );
 
-        let _final_raw_attachment = shipout_attachment_to_s3(
-            file_contents,
-            legacy_raw_attachment,
-            &extra_data.s3_client
-        ).await?;
+        // Add any additional metadata
+        let version = metadata
+            .clone()
+            .into_iter()
+            .fold(version, |v, (k, val)| v.with_metadata(k, val));
+
+        // Upload file content to S3 (metadata is now stored in Redis)
+        let file_key = format!("raw/file/{hash}");
+        use mycorrhiza_common::s3_generic::fetchers_and_getters::S3Addr;
+        use crate::types::env_vars::OPENSCRAPERS_S3_OBJECT_BUCKET;
+
+        S3Addr::new(&extra_data.s3_client, &OPENSCRAPERS_S3_OBJECT_BUCKET, &file_key)
+            .upload_bytes(file_contents)
+            .await?;
 
         attachment.hash = Some(hash);
 
@@ -130,13 +129,16 @@ impl AttachmentProcessor {
             attachment,
             extra_data.fixed_jurisdiction,
             &pool,
-        ).await;
+        )
+        .await;
         if let Err(err) = update_pg_result {
             warn!(%err, url=%attachment.url, %hash, "Updating attachment hash in postgres encountered an error");
         }
 
         // Store in Redis system
-        if let Err(err) = store_attachment_in_redis(&locator, extra_data.fixed_jurisdiction, version).await {
+        if let Err(err) =
+            store_attachment_in_redis(&locator, extra_data.fixed_jurisdiction, version).await
+        {
             warn!(%err, url=%attachment.url, %hash, "Failed to store attachment in Redis system");
         }
 
@@ -205,29 +207,6 @@ async fn mark_attachment_checked(locator: &AttachmentLocator) -> Result<()> {
     store.mark_checked(locator).await
 }
 
-/// Create a legacy RawAttachment for S3 compatibility
-fn create_legacy_raw_attachment_for_s3(
-    extra_data: &OpenscrapersExtraData,
-    hash: Blake2bHash,
-    name: &NonEmptyString,
-    extension: &FileExtension,
-    file_size_bytes: u64,
-    url: &str,
-    metadata: &HashMap<String, String>,
-) -> crate::attachments::types::RawAttachment {
-    crate::attachments::types::RawAttachment {
-        jurisdiction_info: extra_data.jurisdiction_info.clone(),
-        url: url.to_string(),
-        hash,
-        file_size_bytes,
-        name: name.clone(),
-        extension: extension.clone(),
-        text_objects: vec![],
-        date_added: Utc::now(),
-        date_updated: Utc::now(),
-        extra_metadata: metadata.clone(),
-    }
-}
 
 // Supporting types and functions
 pub enum PGUpdateOutcome {
@@ -278,22 +257,6 @@ pub async fn attempt_to_update_hash_of_postgres_attachment(
     }
 }
 
-pub async fn shipout_attachment_to_s3(
-    file_contents: Vec<u8>,
-    mut raw_attachment: crate::attachments::types::RawAttachment,
-    s3_client: &aws_sdk_s3::Client,
-) -> anyhow::Result<crate::attachments::types::RawAttachment> {
-    use crate::s3_stuff::{push_raw_attach_file_to_s3, upload_object};
-
-    let hash = raw_attachment.hash;
-    push_raw_attach_file_to_s3(s3_client, &raw_attachment, file_contents).await?;
-
-    raw_attachment.date_updated = Utc::now();
-
-    upload_object(s3_client, &hash, &raw_attachment).await?;
-
-    Ok(raw_attachment)
-}
 
 static MAXIMUM_EXTERNAL_FILE_DOWNLOADS: Semaphore = Semaphore::const_new(10);
 
@@ -332,3 +295,4 @@ async fn download_file_content_validated_with_retries<T: InternetFileFetch + ?Si
 
     Err(last_error.unwrap())
 }
+
