@@ -50,47 +50,26 @@
             DOKITO_INGEST_REDIS = "http://localhost:6379";
           };
 
-          # Environment validation function
           envValidation = ''
-            echo "🔍 Validating environment configuration..."
-
-            # Check secret environment variables
             missing_secrets=()
             ${builtins.concatStringsSep "\n" (map (var: ''
-              if [ -z "''${${var}:-}" ]; then
-                missing_secrets+=("${var}")
-              fi
+              [ -z "''${${var}:-}" ] && missing_secrets+=("${var}")
             '') secretEnvVars)}
 
             if [ ''${#missing_secrets[@]} -gt 0 ]; then
-              echo "❌ Missing required secret environment variables:"
-              for var in "''${missing_secrets[@]}"; do
-                echo "   - $var"
-              done
+              echo "Error: Missing required secret environment variables:"
+              printf '  - %s\n' "''${missing_secrets[@]}"
               echo ""
-              echo "💡 Please copy example.env to .env and set the required values:"
-              echo "   cp example.env .env"
-              echo "   # Edit .env with your actual values"
-              echo "   source .env"
-              echo ""
+              echo "Copy example.env to .env and set required values:"
+              echo "  cp example.env .env && source .env"
               exit 1
             fi
 
-            # Set defaults for public variables and log when using defaults
-            echo "📝 Public environment variables:"
             ${builtins.concatStringsSep "\n" (map (var: let
               defaultValue = publicEnvVars.${var};
             in ''
-              if [ -z "''${${var}:-}" ]; then
-                export ${var}="${defaultValue}"
-                echo "   ${var}: Using default (${defaultValue})"
-              else
-                echo "   ${var}: Using custom value (''${${var}})"
-              fi
+              [ -z "''${${var}:-}" ] && export ${var}="${defaultValue}"
             '') (builtins.attrNames publicEnvVars))}
-
-            echo "✅ All secret environment variables are set"
-            echo ""
           '';
 
           # Common environment variable setup function
