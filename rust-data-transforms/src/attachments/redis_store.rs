@@ -7,7 +7,7 @@ use redis::{AsyncCommands, Client};
 use serde_json;
 use std::env;
 use std::sync::{LazyLock, OnceLock};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, warn};
 
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
@@ -24,6 +24,29 @@ pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "redis://127.0.0.1:6379".to_string())
 });
+
+pub static MULTIPLEXED_REDIS_CONNECTION: OnceCell<redis::aio::MultiplexedConnection> =
+    OnceCell::const_new();
+
+pub async fn get_universal_multiplexed_redis_connection()
+-> Result<&'static redis::aio::MultiplexedConnection> {
+    async fn create_multiplexed_redis_connection() -> Result<redis::aio::MultiplexedConnection> {
+        let redis_url = &**DOKITO_INGEST_REDIS;
+        let client = Client::open(redis_url).context("Failed to create Redis client")?;
+        let connection = client
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(|e| {
+                tracing::error!("Redis connection error details: {}", e);
+                anyhow::anyhow!("Failed to get Redis connection: {}", e)
+            });
+        connection
+    }
+    let conn = MULTIPLEXED_REDIS_CONNECTION
+        .get_or_try_init(create_multiplexed_redis_connection)
+        .await?;
+    Ok(conn)
+}
 
 impl RedisAttachmentStore {
     /// Create a new Redis attachment store
@@ -80,6 +103,36 @@ impl RedisAttachmentStore {
             "Stored attachment record with locator: {:?} and tag: {}",
             record.locator, tag
         );
+        Ok(())
+    }
+
+    /// Store multiple AttachmentRecords in bulk (tags derived from records)
+    pub async fn store_bulk(&self, records: &[AttachmentRecord]) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.get_connection().await?;
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+
+        for record in records {
+            let data =
+                serde_json::to_string(record).context("Failed to serialize attachment record")?;
+            let key = Self::record_key(&record.locator);
+            let cache_key = record.locator.cache_key();
+            let tag = AttachmentTag::new(record.jurisdiction, record.is_downloaded());
+
+            pipe.hset(&key, "data", &data);
+            pipe.sadd(tag.redis_key(), &cache_key);
+        }
+
+        let _: () = pipe
+            .query_async(&mut conn)
+            .await
+            .context("Failed to bulk store attachment records")?;
+
+        debug!("Bulk stored {} attachment records", records.len());
         Ok(())
     }
 
@@ -199,6 +252,32 @@ impl RedisAttachmentStore {
             "Updated attachment record with locator: {:?}",
             record.locator
         );
+        Ok(())
+    }
+
+    /// Update multiple existing AttachmentRecords in bulk
+    pub async fn update_bulk(&self, records: Vec<AttachmentRecord>) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.get_connection().await?;
+        let mut pipe = redis::pipe();
+        pipe.atomic();
+
+        for record in &records {
+            let data =
+                serde_json::to_string(record).context("Failed to serialize attachment record")?;
+            let key = Self::record_key(&record.locator);
+            pipe.hset(&key, "data", &data);
+        }
+
+        let _: () = pipe
+            .query_async(&mut conn)
+            .await
+            .context("Failed to bulk update attachment records")?;
+
+        debug!("Bulk updated {} attachment records", records.len());
         Ok(())
     }
 
@@ -348,17 +427,15 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
             Ok(store) => {
                 // Test the connection
                 match store.get_connection().await {
-                    Ok(mut conn) => {
-                        match redis::cmd("PING").query_async::<()>(&mut conn).await {
-                            Ok(_) => {
-                                *store_guard = Some(store);
-                            }
-                            Err(e) => {
-                                warn!("Failed to ping Redis server: {}", e);
-                                return None;
-                            }
+                    Ok(mut conn) => match redis::cmd("PING").query_async::<()>(&mut conn).await {
+                        Ok(_) => {
+                            *store_guard = Some(store);
                         }
-                    }
+                        Err(e) => {
+                            warn!("Failed to ping Redis server: {}", e);
+                            return None;
+                        }
+                    },
                     Err(e) => {
                         warn!("Failed to connect to Redis: {}", e);
                         return None;
@@ -374,4 +451,3 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
 
     store_guard.clone()
 }
-
