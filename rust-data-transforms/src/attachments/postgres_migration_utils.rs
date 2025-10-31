@@ -244,18 +244,29 @@ async fn process_bulk_attachments_into_records(
     let mut skipped = 0;
     let mut errors = 0;
 
+    let locators: Vec<AttachmentLocator> = pg_attachments
+        .iter()
+        .filter(|att| !att.attachment_url.trim().is_empty())
+        .map(|att| AttachmentLocator::Url(att.attachment_url.clone()))
+        .collect();
+
+    skipped += pg_attachments.len() - locators.len();
+
+    let existing_records = redis_store.get_bulk(&locators).await?;
+
     for pg_attachment in pg_attachments {
         if pg_attachment.attachment_url.trim().is_empty() {
-            tracing::debug!("Skipping attachment {} with empty URL", pg_attachment.uuid);
-            skipped += 1;
             continue;
         }
 
         let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
 
-        match process_single_attachment_to_record(redis_store, pg_attachment, &locator, fixed_jur)
-            .await
-        {
+        match process_single_attachment_with_existing(
+            existing_records.get(&locator),
+            pg_attachment,
+            &locator,
+            fixed_jur,
+        ) {
             Ok(Some(ProcessedRecord::Create(record))) => {
                 to_create.push(record);
             }
@@ -281,14 +292,12 @@ enum ProcessedRecord {
     Update(AttachmentRecord),
 }
 
-async fn process_single_attachment_to_record(
-    redis_store: &RedisAttachmentStore,
+fn process_single_attachment_with_existing(
+    existing_record: Option<&AttachmentRecord>,
     pg_attachment: &PgAttachmentFull,
     locator: &AttachmentLocator,
     fixed_jur: FixedJurisdiction,
 ) -> Result<Option<ProcessedRecord>> {
-    let existing_record = redis_store.get(locator).await?;
-
     match existing_record {
         Some(mut record) => {
             if record.is_downloaded() {

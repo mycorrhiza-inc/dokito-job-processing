@@ -5,6 +5,7 @@ use super::types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
 use anyhow::{Context, Result};
 use redis::{AsyncCommands, Client};
 use serde_json;
+use std::collections::HashMap;
 use std::env;
 use std::sync::{LazyLock, OnceLock};
 use tokio::sync::{Mutex, OnceCell};
@@ -13,10 +14,8 @@ use tracing::{debug, warn};
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 
 /// Redis store for AttachmentRecord data with tag-based organization
-#[derive(Clone)]
-pub struct RedisAttachmentStore {
-    client: Client,
-}
+#[derive(Clone, Copy)]
+pub struct RedisAttachmentStore;
 
 pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
     env::var("DOKITO_INGEST_REDIS")
@@ -51,21 +50,14 @@ pub async fn get_universal_multiplexed_redis_connection()
 impl RedisAttachmentStore {
     /// Create a new Redis attachment store
     pub fn new() -> Result<Self> {
-        let redis_url = &**DOKITO_INGEST_REDIS;
-        let client = Client::open(redis_url).context("Failed to create Redis client")?;
-
-        Ok(Self { client })
+        Ok(Self)
     }
 
     /// Get a Redis connection
-    async fn get_connection(&self) -> Result<redis::aio::MultiplexedConnection> {
-        self.client
-            .get_multiplexed_async_connection()
+    async fn get_connection() -> Result<redis::aio::MultiplexedConnection> {
+        get_universal_multiplexed_redis_connection()
             .await
-            .map_err(|e| {
-                tracing::error!("Redis connection error details: {}", e);
-                anyhow::anyhow!("Failed to get Redis connection: {}", e)
-            })
+            .map(|conn| conn.clone())
     }
 
     /// Get the Redis key for storing attachment record data
@@ -75,48 +67,20 @@ impl RedisAttachmentStore {
 
     /// Store an AttachmentRecord with the given tag
     pub async fn store(&self, record: &AttachmentRecord, tag: AttachmentTag) -> Result<()> {
-        let mut conn = self.get_connection().await?;
-
-        // Serialize record to JSON
-        let data =
-            serde_json::to_string(record).context("Failed to serialize attachment record")?;
-
-        let key = Self::record_key(&record.locator);
-        let cache_key = record.locator.cache_key();
-
-        // Use pipeline for atomic operation
-        let mut pipe = redis::pipe();
-        pipe.atomic();
-
-        // Store the attachment record data
-        pipe.hset(&key, "data", &data);
-
-        // Add cache key to the tag set
-        pipe.sadd(tag.redis_key(), &cache_key);
-
-        let _: () = pipe
-            .query_async(&mut conn)
-            .await
-            .context("Failed to store attachment record")?;
-
-        debug!(
-            "Stored attachment record with locator: {:?} and tag: {}",
-            record.locator, tag
-        );
-        Ok(())
+        self.store_bulk(std::slice::from_ref(record).to_vec()).await
     }
 
     /// Store multiple AttachmentRecords in bulk (tags derived from records)
-    pub async fn store_bulk(&self, records: &[AttachmentRecord]) -> Result<()> {
+    pub async fn store_bulk(&self, records: Vec<AttachmentRecord>) -> Result<()> {
         if records.is_empty() {
             return Ok(());
         }
 
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
         let mut pipe = redis::pipe();
         pipe.atomic();
 
-        for record in records {
+        for record in &records {
             let data =
                 serde_json::to_string(record).context("Failed to serialize attachment record")?;
             let key = Self::record_key(&record.locator);
@@ -138,22 +102,48 @@ impl RedisAttachmentStore {
 
     /// Get an AttachmentRecord by locator
     pub async fn get(&self, locator: &AttachmentLocator) -> Result<Option<AttachmentRecord>> {
-        let mut conn = self.get_connection().await?;
-        let key = Self::record_key(locator);
+        let mut map = self.get_bulk(std::slice::from_ref(locator)).await?;
+        Ok(map.remove(locator))
+    }
 
-        let data: Option<String> = conn
-            .hget(&key, "data")
-            .await
-            .context("Failed to get attachment record data")?;
-
-        match data {
-            Some(json_data) => {
-                let record = serde_json::from_str::<AttachmentRecord>(&json_data)
-                    .context("Failed to deserialize attachment record")?;
-                Ok(Some(record))
-            }
-            None => Ok(None),
+    /// Get multiple AttachmentRecords by locators in bulk
+    pub async fn get_bulk(
+        &self,
+        locators: &[AttachmentLocator],
+    ) -> Result<HashMap<AttachmentLocator, AttachmentRecord>> {
+        if locators.is_empty() {
+            return Ok(HashMap::new());
         }
+
+        let mut conn = Self::get_connection().await?;
+        let mut pipe = redis::pipe();
+
+        for locator in locators {
+            let key = Self::record_key(locator);
+            pipe.hget(&key, "data");
+        }
+
+        let results: Vec<Option<String>> = pipe
+            .query_async(&mut conn)
+            .await
+            .context("Failed to bulk get attachment records")?;
+
+        let mut map = HashMap::new();
+        for (locator, data) in locators.iter().zip(results.iter()) {
+            if let Some(json_data) = data {
+                match serde_json::from_str::<AttachmentRecord>(json_data) {
+                    Ok(record) => {
+                        map.insert(locator.clone(), record);
+                    }
+                    Err(e) => {
+                        warn!("Failed to deserialize attachment record from Redis: {}", e);
+                    }
+                }
+            }
+        }
+
+        debug!("Bulk retrieved {} attachment records", map.len());
+        Ok(map)
     }
 
     /// Get an AttachmentRecord by URL (convenience method)
@@ -164,7 +154,7 @@ impl RedisAttachmentStore {
 
     /// Get all AttachmentRecords with the specified tag using SORT with GET
     pub async fn get_all_by_tag(&self, tag: AttachmentTag) -> Result<Vec<AttachmentRecord>> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
 
         // Use SORT command with GET pattern to fetch all attachment data in one Redis call
         let results: Vec<String> = redis::cmd("SORT")
@@ -207,7 +197,7 @@ impl RedisAttachmentStore {
         from_tag: AttachmentTag,
         to_tag: AttachmentTag,
     ) -> Result<()> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
         let cache_key = locator.cache_key();
 
         // Use pipeline for atomic operation
@@ -234,25 +224,8 @@ impl RedisAttachmentStore {
 
     /// Update an existing AttachmentRecord (preserving its current tag)
     pub async fn update(&self, record: &AttachmentRecord) -> Result<()> {
-        let mut conn = self.get_connection().await?;
-
-        // Serialize record to JSON
-        let data =
-            serde_json::to_string(record).context("Failed to serialize attachment record")?;
-
-        let key = Self::record_key(&record.locator);
-
-        // Update the record data
-        let _: () = conn
-            .hset(&key, "data", &data)
+        self.update_bulk(std::slice::from_ref(record).to_vec())
             .await
-            .context("Failed to update attachment record")?;
-
-        debug!(
-            "Updated attachment record with locator: {:?}",
-            record.locator
-        );
-        Ok(())
     }
 
     /// Update multiple existing AttachmentRecords in bulk
@@ -261,7 +234,7 @@ impl RedisAttachmentStore {
             return Ok(());
         }
 
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
         let mut pipe = redis::pipe();
         pipe.atomic();
 
@@ -327,7 +300,7 @@ impl RedisAttachmentStore {
 
     /// List cache keys for a specific tag (without fetching the full record data)
     pub async fn list_cache_keys_by_tag(&self, tag: AttachmentTag) -> Result<Vec<String>> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
 
         let cache_keys: Vec<String> = conn
             .smembers(tag.redis_key())
@@ -339,7 +312,7 @@ impl RedisAttachmentStore {
 
     /// Delete an attachment record and remove it from all tags
     pub async fn delete(&self, locator: &AttachmentLocator) -> Result<()> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
         let key = Self::record_key(locator);
         let cache_key = locator.cache_key();
 
@@ -366,7 +339,7 @@ impl RedisAttachmentStore {
 
     /// Check if an attachment record exists for the given locator
     pub async fn exists(&self, locator: &AttachmentLocator) -> Result<bool> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
         let key = Self::record_key(locator);
 
         let exists: bool = conn
@@ -379,7 +352,7 @@ impl RedisAttachmentStore {
 
     /// Get count of attachment records for a specific tag
     pub async fn count_by_tag(&self, tag: AttachmentTag) -> Result<usize> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
 
         let count: usize = conn
             .scard(tag.redis_key())
@@ -394,7 +367,7 @@ impl RedisAttachmentStore {
         &self,
         locator: &AttachmentLocator,
     ) -> Result<Vec<AttachmentTag>> {
-        let mut conn = self.get_connection().await?;
+        let mut conn = Self::get_connection().await?;
         let cache_key = locator.cache_key();
         let mut tags = Vec::new();
 
