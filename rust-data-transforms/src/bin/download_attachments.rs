@@ -57,7 +57,7 @@ async fn fetch_missing_attachments_from_postgres(
          WHERE file_hash_if_downloaded IS NULL OR file_hash_if_downloaded = ''"
     );
 
-    let records: Vec<MissingAttachmentRecord> = sqlx::query_as(&query).fetch_all(&*pool).await?;
+    let records: Vec<MissingAttachmentRecord> = sqlx::query_as(&query).fetch_all(pool).await?;
 
     let mut attachments = Vec::new();
     for record in records {

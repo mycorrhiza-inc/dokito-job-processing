@@ -1,6 +1,6 @@
 use crate::attachments::OpenscrapersExtraData;
 use crate::data_processing_traits::{
-    DownloadIncomplete, ProcessFrom, Revalidate, RevalidationOutcome,
+    ProcessFrom, Revalidate,
 };
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::s3_stuff::{DocketAddress, download_openscrapers_object, make_s3_client, upload_object};
@@ -9,11 +9,10 @@ use crate::types::raw::JurisdictionInfo;
 use crate::types::raw::RawGenericDocket;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures_util::{StreamExt, stream};
+use futures_util::StreamExt;
 use mycorrhiza_common::tasks::{ExecuteUserTask, map_err_as_json};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 // pub mod attachments; // Removed - functionality moved to main attachments module
 pub mod file_fetching;

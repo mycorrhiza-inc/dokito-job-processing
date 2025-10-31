@@ -8,7 +8,7 @@ use serde_json;
 use std::collections::HashMap;
 use std::env;
 use std::sync::{LazyLock, OnceLock};
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
