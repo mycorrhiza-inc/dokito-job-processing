@@ -12,10 +12,6 @@ use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, warn};
 
 
-/// Redis store for AttachmentRecord data with tag-based organization
-#[derive(Clone, Copy)]
-pub struct RedisAttachmentStore;
-
 pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
     env::var("DOKITO_INGEST_REDIS")
         .ok()
@@ -23,39 +19,38 @@ pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_else(|| "redis://127.0.0.1:6379".to_string())
 });
 
-pub static MULTIPLEXED_REDIS_CONNECTION: OnceCell<redis::aio::MultiplexedConnection> =
-    OnceCell::const_new();
+static GLOBAL_REDIS_CLIENT: LazyLock<Result<Client, anyhow::Error>> = LazyLock::new(|| {
+    let redis_url = &**DOKITO_INGEST_REDIS;
+    Client::open(redis_url).context("Failed to create Redis client")
+});
 
-pub async fn get_universal_multiplexed_redis_connection()
--> Result<&'static redis::aio::MultiplexedConnection> {
-    async fn create_multiplexed_redis_connection() -> Result<redis::aio::MultiplexedConnection> {
-        let redis_url = &**DOKITO_INGEST_REDIS;
-        let client = Client::open(redis_url).context("Failed to create Redis client")?;
-        
-        client
+fn get_global_redis_client() -> Result<&'static Client> {
+    GLOBAL_REDIS_CLIENT.as_ref().map_err(|e| anyhow::anyhow!("{}", e))
+}
+
+/// Redis store for AttachmentRecord data with tag-based organization
+#[derive(Clone)]
+pub struct RedisAttachmentStore {
+    client: &'static Client,
+}
+
+impl RedisAttachmentStore {
+    /// Create a new Redis attachment store
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            client: get_global_redis_client()?,
+        })
+    }
+
+    /// Get a Redis connection (cheap to clone, can be used concurrently)
+    async fn get_connection(&self) -> Result<redis::aio::MultiplexedConnection> {
+        self.client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| {
                 tracing::error!("Redis connection error details: {}", e);
                 anyhow::anyhow!("Failed to get Redis connection: {}", e)
             })
-    }
-    let conn = MULTIPLEXED_REDIS_CONNECTION
-        .get_or_try_init(create_multiplexed_redis_connection)
-        .await?;
-    Ok(conn)
-}
-
-impl RedisAttachmentStore {
-    /// Create a new Redis attachment store
-    pub fn new() -> Result<Self> {
-        Ok(Self)
-    }
-
-    /// Get a Redis connection
-    async fn get_connection() -> Result<redis::aio::MultiplexedConnection> {
-        get_universal_multiplexed_redis_connection()
-            .await.cloned()
     }
 
     /// Get the Redis key for storing attachment record data
@@ -74,7 +69,7 @@ impl RedisAttachmentStore {
             return Ok(());
         }
 
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let mut pipe = redis::pipe();
         pipe.atomic();
 
@@ -113,7 +108,7 @@ impl RedisAttachmentStore {
             return Ok(HashMap::new());
         }
 
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let mut pipe = redis::pipe();
 
         for locator in locators {
@@ -152,7 +147,7 @@ impl RedisAttachmentStore {
 
     /// Get all AttachmentRecords with the specified tag using SORT with GET
     pub async fn get_all_by_tag(&self, tag: AttachmentTag) -> Result<Vec<AttachmentRecord>> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
 
         // Use SORT command with GET pattern to fetch all attachment data in one Redis call
         let results: Vec<String> = redis::cmd("SORT")
@@ -195,7 +190,7 @@ impl RedisAttachmentStore {
         from_tag: AttachmentTag,
         to_tag: AttachmentTag,
     ) -> Result<()> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let cache_key = locator.cache_key();
 
         // Use pipeline for atomic operation
@@ -232,7 +227,7 @@ impl RedisAttachmentStore {
             return Ok(());
         }
 
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let mut pipe = redis::pipe();
         pipe.atomic();
 
@@ -298,7 +293,7 @@ impl RedisAttachmentStore {
 
     /// List cache keys for a specific tag (without fetching the full record data)
     pub async fn list_cache_keys_by_tag(&self, tag: AttachmentTag) -> Result<Vec<String>> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
 
         let cache_keys: Vec<String> = conn
             .smembers(tag.redis_key())
@@ -310,7 +305,7 @@ impl RedisAttachmentStore {
 
     /// Delete an attachment record and remove it from all tags
     pub async fn delete(&self, locator: &AttachmentLocator) -> Result<()> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let key = Self::record_key(locator);
         let cache_key = locator.cache_key();
 
@@ -337,7 +332,7 @@ impl RedisAttachmentStore {
 
     /// Check if an attachment record exists for the given locator
     pub async fn exists(&self, locator: &AttachmentLocator) -> Result<bool> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let key = Self::record_key(locator);
 
         let exists: bool = conn
@@ -350,7 +345,7 @@ impl RedisAttachmentStore {
 
     /// Get count of attachment records for a specific tag
     pub async fn count_by_tag(&self, tag: AttachmentTag) -> Result<usize> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
 
         let count: usize = conn
             .scard(tag.redis_key())
@@ -365,7 +360,7 @@ impl RedisAttachmentStore {
         &self,
         locator: &AttachmentLocator,
     ) -> Result<Vec<AttachmentTag>> {
-        let mut conn = Self::get_connection().await?;
+        let mut conn = self.get_connection().await?;
         let cache_key = locator.cache_key();
         let mut tags = Vec::new();
 
@@ -397,7 +392,7 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
         match RedisAttachmentStore::new() {
             Ok(store) => {
                 // Test the connection
-                match RedisAttachmentStore::get_connection().await {
+                match store.get_connection().await {
                     Ok(mut conn) => match redis::cmd("PING").query_async::<()>(&mut conn).await {
                         Ok(_) => {
                             *store_guard = Some(store);
@@ -420,5 +415,5 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
         }
     }
 
-    *store_guard
+    store_guard.clone()
 }
