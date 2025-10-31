@@ -1,15 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
+use futures::future::join_all;
+use mycorrhiza_common::file_extension::FileExtension;
+use rust_data_transforms::attachments::OpenscrapersExtraData;
 use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use rust_data_transforms::data_processing_traits::DownloadIncomplete;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
-use rust_data_transforms::attachments::OpenscrapersExtraData;
+use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
 use rust_data_transforms::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
-use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
-use mycorrhiza_common::file_extension::FileExtension;
 use std::io::{self, Read, Write};
 use std::str::FromStr;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -55,9 +57,7 @@ async fn fetch_missing_attachments_from_postgres(
          WHERE file_hash_if_downloaded IS NULL OR file_hash_if_downloaded = ''"
     );
 
-    let records: Vec<MissingAttachmentRecord> = sqlx::query_as(&query)
-        .fetch_all(&*pool)
-        .await?;
+    let records: Vec<MissingAttachmentRecord> = sqlx::query_as(&query).fetch_all(&*pool).await?;
 
     let mut attachments = Vec::new();
     for record in records {
@@ -101,17 +101,31 @@ async fn main() -> Result<()> {
 
     if cli.all_missing_in_postgres {
         // Fetch missing attachments from PostgreSQL and process them
-        let mut missing_attachments = fetch_missing_attachments_from_postgres(cli.fixed_jur).await?;
+        let mut missing_attachments =
+            fetch_missing_attachments_from_postgres(cli.fixed_jur).await?;
 
-        tracing::info!("Found {} missing attachments in PostgreSQL", missing_attachments.len());
+        tracing::info!(
+            "Found {} missing attachments in PostgreSQL",
+            missing_attachments.len()
+        );
 
-        for attachment in missing_attachments.iter_mut() {
-            let _res = attachment
-                .download_incomplete(extra_data.clone())
-                .await?;
+        let simultanous_downloads = Semaphore::new(10);
+        let simultaneous_ref = &simultanous_downloads;
+        for attachments_chunk in missing_attachments.chunks_mut(200) {
+            let mut futures = Vec::new();
+            for attachment in attachments_chunk.iter_mut() {
+                futures.push(async {
+                    let _permit = simultaneous_ref.acquire().await;
+                    let _res = attachment.download_incomplete(extra_data.clone()).await;
+                });
+            }
+            join_all(futures).await;
         }
 
-        tracing::info!("Completed downloading {} attachments", missing_attachments.len());
+        tracing::info!(
+            "Completed downloading {} attachments",
+            missing_attachments.len()
+        );
 
         // Output the processed attachments
         let result = serde_json::to_string(&missing_attachments)?;
