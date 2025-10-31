@@ -11,6 +11,7 @@ use crate::attachments::{
     AttachmentLocator, AttachmentRecord, AttachmentTag, AttachmentVersion, RedisAttachmentStore,
     get_redis_store,
 };
+use crate::attachments::redis_store::UpdateRedisAttachment;
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 
@@ -192,7 +193,20 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
                 }
 
                 if !to_update.is_empty() {
-                    if let Err(e) = redis_store.update_bulk(to_update).await {
+                    // Convert AttachmentRecord to UpdateRedisAttachment for migration
+                    let updates: Vec<UpdateRedisAttachment> = to_update
+                        .into_iter()
+                        .map(|record| {
+                            // For migration, assume the previous tag matches the current state
+                            let previous_tag = AttachmentTag::new(record.jurisdiction, record.is_downloaded());
+                            UpdateRedisAttachment {
+                                record,
+                                previous_tag,
+                            }
+                        })
+                        .collect();
+
+                    if let Err(e) = redis_store.update_bulk(updates).await {
                         tracing::warn!("Failed to bulk update records: {}", e);
                         error_count += update_len;
                     } else {

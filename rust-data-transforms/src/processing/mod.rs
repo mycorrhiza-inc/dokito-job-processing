@@ -1,11 +1,11 @@
+use crate::attachments::OpenscrapersExtraData;
 use crate::data_processing_traits::{
     DownloadIncomplete, ProcessFrom, Revalidate, RevalidationOutcome,
 };
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
-use crate::attachments::OpenscrapersExtraData;
 use crate::s3_stuff::{DocketAddress, download_openscrapers_object, make_s3_client, upload_object};
-use crate::types::raw::JurisdictionInfo;
 use crate::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
+use crate::types::raw::JurisdictionInfo;
 use crate::types::raw::RawGenericDocket;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -53,42 +53,6 @@ pub fn make_reflist_of_attachments_without_hash(
     case_refs
 }
 
-impl DownloadIncomplete for ProcessedGenericDocket {
-    type ExtraData = OpenscrapersExtraData;
-    async fn download_incomplete(
-        &mut self,
-        extra: Self::ExtraData,
-    ) -> anyhow::Result<RevalidationOutcome> {
-        let _ = self.revalidate().await;
-        // info!(govid=%self.case_govid, jurisdiction=%extra.jurisdiction_info.jurisdiction, opened_date = %self.opened_date, uuid = %self.object_uuid,"Attempting to download attachments for docket");
-        let attachment_refs = make_reflist_of_attachments_without_hash(self);
-        let futures_stream = stream::iter(attachment_refs.into_iter().map(|val| {
-            let extra_clone = extra.clone();
-            async move {
-                DownloadIncomplete::download_incomplete(val, extra_clone).await
-            }
-        }));
-        const CONCURRENT_ATTACHMENTS: usize = 10;
-        let change_results = futures_stream
-            .buffer_unordered(CONCURRENT_ATTACHMENTS)
-            .collect::<Vec<_>>()
-            .await;
-        let total_change_count = change_results
-            .iter()
-            .map(|val| match val {
-                Ok(RevalidationOutcome::DidChange) => 1,
-                _ => 0,
-            })
-            .sum();
-        info!(govid=%self.case_govid, jurisdiction=%extra.jurisdiction_info.jurisdiction, opened_date = %self.opened_date, uuid = %self.object_uuid, attachments_downloaded = %total_change_count,"Successfully downloaded all attachments for docket");
-        let did_docket_change = match total_change_count {
-            0 => RevalidationOutcome::NoChanges,
-            _ => RevalidationOutcome::DidChange,
-        };
-        Ok(did_docket_change)
-    }
-}
-
 pub async fn process_case(
     raw_case: RawGenericDocket,
     extra_data: OpenscrapersExtraData,
@@ -120,8 +84,12 @@ pub async fn process_case(
             .await
             .ok();
 
-    let mut processed_case =
-        ProcessedGenericDocket::process_from(raw_case, processed_case_cache, extra_data.fixed_jurisdiction).await?;
+    let mut processed_case = ProcessedGenericDocket::process_from(
+        raw_case,
+        processed_case_cache,
+        extra_data.fixed_jurisdiction,
+    )
+    .await?;
     let _outcome = processed_case.revalidate().await;
 
     upload_object(s3_client, &docket_address, &processed_case).await?;

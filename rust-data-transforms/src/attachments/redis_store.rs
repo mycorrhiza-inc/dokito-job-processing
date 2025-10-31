@@ -34,6 +34,11 @@ pub struct RedisAttachmentStore {
     client: &'static Client,
 }
 
+pub struct UpdateRedisAttachment {
+    pub record: AttachmentRecord,
+    pub previous_tag: AttachmentTag,
+}
+
 impl RedisAttachmentStore {
     /// Create a new Redis attachment store
     pub fn new() -> Result<Self> {
@@ -214,15 +219,14 @@ impl RedisAttachmentStore {
         Ok(())
     }
 
-    /// Update an existing AttachmentRecord (preserving its current tag)
-    pub async fn update(&self, record: &AttachmentRecord) -> Result<()> {
-        self.update_bulk(std::slice::from_ref(record).to_vec())
-            .await
+    /// Update an existing AttachmentRecord with explicit tag management
+    pub async fn update(&self, update: UpdateRedisAttachment) -> Result<()> {
+        self.update_bulk(vec![update]).await
     }
 
-    /// Update multiple existing AttachmentRecords in bulk
-    pub async fn update_bulk(&self, records: Vec<AttachmentRecord>) -> Result<()> {
-        if records.is_empty() {
+    /// Update multiple existing AttachmentRecords in bulk with tag management
+    pub async fn update_bulk(&self, updates: Vec<UpdateRedisAttachment>) -> Result<()> {
+        if updates.is_empty() {
             return Ok(());
         }
 
@@ -230,11 +234,23 @@ impl RedisAttachmentStore {
         let mut pipe = redis::pipe();
         pipe.atomic();
 
-        for record in &records {
-            let data =
-                serde_json::to_string(record).context("Failed to serialize attachment record")?;
-            let key = Self::record_key(&record.locator);
+        for update in &updates {
+            let data = serde_json::to_string(&update.record)
+                .context("Failed to serialize attachment record")?;
+            let key = Self::record_key(&update.record.locator);
+            let cache_key = update.record.locator.cache_key();
+            let new_tag = AttachmentTag::new(update.record.jurisdiction, update.record.is_downloaded());
+
+            // Update the record data
             pipe.hset(&key, "data", &data);
+
+            // Update tags if they've changed
+            if update.previous_tag != new_tag {
+                // Remove from old tag
+                pipe.srem(update.previous_tag.redis_key(), &cache_key);
+                // Add to new tag
+                pipe.sadd(new_tag.redis_key(), &cache_key);
+            }
         }
 
         let _: () = pipe
@@ -242,7 +258,7 @@ impl RedisAttachmentStore {
             .await
             .context("Failed to bulk update attachment records")?;
 
-        debug!("Bulk updated {} attachment records", records.len());
+        debug!("Bulk updated {} attachment records with tag management", updates.len());
         Ok(())
     }
 
@@ -262,11 +278,19 @@ impl RedisAttachmentStore {
                 ));
             }
         };
+
+        // Track the previous tag before modification
+        let previous_tag = AttachmentTag::new(record.jurisdiction, record.is_downloaded());
+
         // Add the new version
         record.add_version(version);
 
-        // Update the record
-        self.update(&record).await
+        // Update the record with proper tag tracking
+        let update = UpdateRedisAttachment {
+            record,
+            previous_tag,
+        };
+        self.update(update).await
     }
 
     /// Mark an attachment as checked (update last_checked_at)
@@ -282,11 +306,18 @@ impl RedisAttachmentStore {
             }
         };
 
+        // Track the previous tag before modification
+        let previous_tag = AttachmentTag::new(record.jurisdiction, record.is_downloaded());
+
         // Mark as checked
         record.mark_checked();
 
-        // Update the record
-        self.update(&record).await
+        // Update the record with proper tag tracking
+        let update = UpdateRedisAttachment {
+            record,
+            previous_tag,
+        };
+        self.update(update).await
     }
 
     /// List cache keys for a specific tag (without fetching the full record data)

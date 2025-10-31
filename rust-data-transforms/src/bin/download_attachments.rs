@@ -4,8 +4,8 @@ use futures::future::join_all;
 use mycorrhiza_common::file_extension::FileExtension;
 use rust_data_transforms::attachments::OpenscrapersExtraData;
 use rust_data_transforms::cli_input_types::CliProcessedDockets;
-use rust_data_transforms::data_processing_traits::DownloadIncomplete;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
+use rust_data_transforms::data_processing_traits::DownloadIncomplete;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
 use rust_data_transforms::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
@@ -82,6 +82,24 @@ async fn fetch_missing_attachments_from_postgres(
     Ok(attachments)
 }
 
+pub async fn download_bulk_attachments(
+    raw_attachments: &mut [&mut ProcessedGenericAttachment],
+    extra_data: OpenscrapersExtraData,
+) {
+    let simultanous_downloads = Semaphore::new(10);
+    let simultaneous_ref = &simultanous_downloads;
+    for attachments_chunk in raw_attachments.chunks_mut(200) {
+        let mut futures = Vec::new();
+        for attachment in attachments_chunk.iter_mut() {
+            futures.push(async {
+                let _permit = simultaneous_ref.acquire().await;
+                let _res = attachment.download_incomplete(extra_data.clone()).await;
+            });
+        }
+        join_all(futures).await;
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -109,18 +127,11 @@ async fn main() -> Result<()> {
             missing_attachments.len()
         );
 
-        let simultanous_downloads = Semaphore::new(10);
-        let simultaneous_ref = &simultanous_downloads;
-        for attachments_chunk in missing_attachments.chunks_mut(200) {
-            let mut futures = Vec::new();
-            for attachment in attachments_chunk.iter_mut() {
-                futures.push(async {
-                    let _permit = simultaneous_ref.acquire().await;
-                    let _res = attachment.download_incomplete(extra_data.clone()).await;
-                });
-            }
-            join_all(futures).await;
-        }
+        // Create mutable references for bulk downloader
+        let mut attachment_refs: Vec<&mut ProcessedGenericAttachment> =
+            missing_attachments.iter_mut().collect();
+
+        download_bulk_attachments(&mut attachment_refs, extra_data).await;
 
         tracing::info!(
             "Completed downloading {} attachments",
@@ -131,7 +142,7 @@ async fn main() -> Result<()> {
         let result = serde_json::to_string(&missing_attachments)?;
         io::stdout().write_all(result.as_bytes())?;
     } else {
-        // Original stdin-based processing
+        // Simplified stdin-based processing
         let mut input = String::new();
         io::stdin().read_to_string(&mut input)?;
 
@@ -140,13 +151,21 @@ async fn main() -> Result<()> {
         }
 
         let cli_processed_dockets: CliProcessedDockets = serde_json::from_str(&input)?;
-        let mut processed_dockets: Vec<_> = cli_processed_dockets.into();
+        let mut processed_dockets: Vec<ProcessedGenericDocket> = cli_processed_dockets.into();
 
-        for processed_docket in processed_dockets.iter_mut() {
-            let _res = processed_docket
-                .download_incomplete(extra_data.clone())
-                .await?;
-        }
+        // Extract all attachments from all dockets through filings
+        let mut all_attachments: Vec<&mut ProcessedGenericAttachment> = processed_dockets
+            .iter_mut()
+            .flat_map(|docket| docket.filings.iter_mut())
+            .flat_map(|filing| filing.attachments.iter_mut())
+            .collect();
+
+        tracing::info!("Found {} attachments to download", all_attachments.len());
+
+        // Use bulk downloader for all attachments
+        download_bulk_attachments(&mut all_attachments, extra_data).await;
+
+        tracing::info!("Completed downloading {} attachments", all_attachments.len());
 
         // This returns a list even if only one was imported just to make the output json schema
         // consistent.

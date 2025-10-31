@@ -1,6 +1,6 @@
 //! Next-generation attachment downloading with history tracking
 
-use super::redis_store::RedisAttachmentStore;
+use super::redis_store::{RedisAttachmentStore, UpdateRedisAttachment};
 use super::tags::AttachmentTag;
 use super::types::{AttachmentLocator, AttachmentRecord, AttachmentVersion};
 use crate::data_processing_traits::{DownloadIncomplete, RevalidationOutcome};
@@ -172,18 +172,29 @@ async fn store_attachment_in_redis(
 
     // Check if record already exists
     if let Some(mut existing_record) = store.get(locator).await? {
+        // Track the previous tag before any modifications
+        let previous_tag = AttachmentTag::new(existing_record.jurisdiction, existing_record.is_downloaded());
+
         // Check if this is a new version or same content
         if let Some(current_version) = existing_record.current_version()
             && current_version.same_content(&version) {
                 // Same content, just mark as checked
                 existing_record.mark_checked();
-                store.update(&existing_record).await?;
+                let update = UpdateRedisAttachment {
+                    record: existing_record,
+                    previous_tag,
+                };
+                store.update(update).await?;
                 return Ok(());
             }
 
         // New version, add it to history
         existing_record.add_version(version);
-        store.update(&existing_record).await?;
+        let update = UpdateRedisAttachment {
+            record: existing_record,
+            previous_tag,
+        };
+        store.update(update).await?;
     } else {
         // Create new record
         let mut record = AttachmentRecord::new(locator.clone(), jurisdiction);
