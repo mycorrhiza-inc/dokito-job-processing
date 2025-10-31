@@ -153,9 +153,8 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
     tracing::info!("Found {} attachments to process", attachments.len());
 
     let downloaded_tag = AttachmentTag::new(fixed_jur, true);
-    let downloaded_url_records: HashSet<String> = redis_store
-        .get_all_by_tag(downloaded_tag)
-        .await?
+    let downloaded_url_records = redis_store.get_all_by_tag(downloaded_tag).await?;
+    let downloaded_urls: HashSet<String> = downloaded_url_records
         .into_iter()
         .filter_map(|record| record.locator.as_url().map(|s| s.to_string()))
         .collect();
