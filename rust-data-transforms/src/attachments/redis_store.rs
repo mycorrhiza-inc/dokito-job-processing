@@ -145,37 +145,38 @@ impl RedisAttachmentStore {
         self.get(&locator).await
     }
 
-    /// Get all AttachmentRecords with the specified tag using SORT with GET
+    /// Get all AttachmentRecords with the specified tag
     pub async fn get_all_by_tag(&self, tag: AttachmentTag) -> Result<Vec<AttachmentRecord>> {
-        let mut conn = self.get_connection().await?;
+        tracing::debug!("Fetching all cache keys for tag: {}", tag);
+        let cache_keys = self.list_cache_keys_by_tag(tag).await?;
+        tracing::info!("Found {} cache keys for tag: {}", cache_keys.len(), tag);
 
-        // Use SORT command with GET pattern to fetch all attachment data in one Redis call
-        let results: Vec<String> = redis::cmd("SORT")
-            .arg(tag.redis_key())
-            .arg("GET")
-            .arg("v2_attachment:*->data")
-            .query_async(&mut conn)
-            .await
-            .context("Failed to get attachment records by tag")?;
-
-        let mut records = Vec::new();
-
-        for result in results {
-            if result.is_empty() {
-                // Skip empty results (can happen if attachment was deleted but tag wasn't cleaned up)
-                continue;
-            }
-
-            match serde_json::from_str::<AttachmentRecord>(&result) {
-                Ok(record) => records.push(record),
-                Err(e) => {
-                    warn!("Failed to deserialize attachment record from Redis: {}", e);
-                    // Continue processing other records
-                }
-            }
+        if cache_keys.is_empty() {
+            return Ok(Vec::new());
         }
 
-        debug!(
+        // Convert cache keys to locators
+        let locators: Vec<AttachmentLocator> = cache_keys
+            .iter()
+            .filter_map(|key| {
+                if let Some(url) = key.strip_prefix("url:") {
+                    Some(AttachmentLocator::Url(url.to_string()))
+                } else {
+                    tracing::warn!("Unrecognized cache key format: {}", key);
+                    None
+                }
+            })
+            .collect();
+
+        tracing::debug!("Converted {} cache keys to locators", locators.len());
+
+        // Use bulk get to fetch all records
+        let records_map = self.get_bulk(&locators).await
+            .with_context(|| format!("Failed to bulk fetch {} records for tag: {}", locators.len(), tag))?;
+
+        let records: Vec<AttachmentRecord> = records_map.into_values().collect();
+
+        tracing::info!(
             "Retrieved {} attachment records for tag: {}",
             records.len(),
             tag
