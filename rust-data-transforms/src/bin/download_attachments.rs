@@ -2,10 +2,12 @@ use anyhow::Result;
 use clap::Parser;
 use futures::future::join_all;
 use mycorrhiza_common::file_extension::FileExtension;
+use rand::rng;
+use rand::seq::SliceRandom;
 use rust_data_transforms::attachments::OpenscrapersExtraData;
 use rust_data_transforms::cli_input_types::CliProcessedDockets;
-use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::data_processing_traits::DownloadIncomplete;
+use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
 use rust_data_transforms::types::processed::{ProcessedGenericAttachment, ProcessedGenericDocket};
@@ -83,9 +85,12 @@ async fn fetch_missing_attachments_from_postgres(
 }
 
 pub async fn download_bulk_attachments(
-    raw_attachments: &mut [&mut ProcessedGenericAttachment],
+    mut raw_attachments: Vec<&mut ProcessedGenericAttachment>,
     extra_data: OpenscrapersExtraData,
 ) {
+    let mut rng = rng();
+    raw_attachments.shuffle(&mut rng);
+
     let simultanous_downloads = Semaphore::new(10);
     let simultaneous_ref = &simultanous_downloads;
     for attachments_chunk in raw_attachments.chunks_mut(200) {
@@ -128,10 +133,10 @@ async fn main() -> Result<()> {
         );
 
         // Create mutable references for bulk downloader
-        let mut attachment_refs: Vec<&mut ProcessedGenericAttachment> =
+        let attachment_refs: Vec<&mut ProcessedGenericAttachment> =
             missing_attachments.iter_mut().collect();
 
-        download_bulk_attachments(&mut attachment_refs, extra_data).await;
+        download_bulk_attachments(attachment_refs, extra_data).await;
 
         tracing::info!(
             "Completed downloading {} attachments",
@@ -154,7 +159,7 @@ async fn main() -> Result<()> {
         let mut processed_dockets: Vec<ProcessedGenericDocket> = cli_processed_dockets.into();
 
         // Extract all attachments from all dockets through filings
-        let mut all_attachments: Vec<&mut ProcessedGenericAttachment> = processed_dockets
+        let all_attachments: Vec<&mut ProcessedGenericAttachment> = processed_dockets
             .iter_mut()
             .flat_map(|docket| docket.filings.iter_mut())
             .flat_map(|filing| filing.attachments.iter_mut())
@@ -163,9 +168,9 @@ async fn main() -> Result<()> {
         tracing::info!("Found {} attachments to download", all_attachments.len());
 
         // Use bulk downloader for all attachments
-        download_bulk_attachments(&mut all_attachments, extra_data).await;
+        download_bulk_attachments(all_attachments, extra_data).await;
 
-        tracing::info!("Completed downloading {} attachments", all_attachments.len());
+        tracing::info!("Completed downloading attachments",);
 
         // This returns a list even if only one was imported just to make the output json schema
         // consistent.
