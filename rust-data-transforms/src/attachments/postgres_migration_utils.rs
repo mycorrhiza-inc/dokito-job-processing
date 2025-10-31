@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
 use futures::future::join_all;
 use mycorrhiza_common::file_extension::{FileExtension, StaticExtension};
@@ -148,92 +150,144 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
     .fetch_all(pool)
     .await?;
 
-    tracing::info!("Found {} attachments to migrate", attachments.len());
+    tracing::info!("Found {} attachments to process", attachments.len());
 
-    let created_count = std::sync::atomic::AtomicUsize::new(0);
-    let updated_count = std::sync::atomic::AtomicUsize::new(0);
-    let skipped_count = std::sync::atomic::AtomicUsize::new(0);
-    let error_count = std::sync::atomic::AtomicUsize::new(0);
+    let downloaded_tag = AttachmentTag::new(fixed_jur, true);
+    let downloaded_url_records: HashSet<String> = redis_store
+        .get_all_by_tag(downloaded_tag)
+        .await?
+        .into_iter()
+        .filter_map(|record| record.locator.as_url().map(|s| s.to_string()))
+        .collect();
 
-    let block_size = 200;
+    tracing::info!(
+        "Found {} attachments already downloaded in Redis, filtering them out",
+        downloaded_urls.len()
+    );
+
+    let attachments: Vec<_> = attachments
+        .into_iter()
+        .filter(|att| !downloaded_urls.contains(&att.attachment_url))
+        .collect();
+
+    tracing::info!("{} attachments remaining to migrate", attachments.len());
+
+    let mut created_count = 0;
+    let mut updated_count = 0;
+    let mut skipped_count = 0;
+    let mut error_count = 0;
+
+    let block_size = 300;
 
     for (block_index, chunk) in attachments.chunks(block_size).enumerate() {
-        let simultanous_tasks_in_block = Semaphore::new(30);
-        let mut futures = Vec::new();
+        match process_bulk_attachments_into_records(&redis_store, chunk, fixed_jur).await {
+            Ok((to_create, to_update, block_skipped, block_errors)) => {
+                let create_len = to_create.len();
+                let update_len = to_update.len();
 
-        for pg_attachment in chunk {
-            if pg_attachment.attachment_url.trim().is_empty() {
-                tracing::debug!("Skipping attachment {} with empty URL", pg_attachment.uuid);
-                skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                continue;
-            }
-
-            let future = async {
-                let _permit = simultanous_tasks_in_block.acquire().await;
-                let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
-                match process_single_attachment(&redis_store, pg_attachment, &locator, fixed_jur)
-                    .await
-                {
-                    Ok(MigrationResult::Created) => {
-                        created_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    Ok(MigrationResult::Updated) => {
-                        updated_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    Ok(MigrationResult::Skipped) => {
-                        skipped_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to process attachment {}: {}",
-                            pg_attachment.uuid,
-                            e
-                        );
-                        error_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if !to_create.is_empty() {
+                    if let Err(e) = redis_store.store_bulk(to_create).await {
+                        tracing::warn!("Failed to bulk store records: {}", e);
+                        error_count += create_len;
+                    } else {
+                        created_count += create_len;
                     }
                 }
-            };
-            futures.push(future);
-        }
 
-        join_all(futures).await;
+                if !to_update.is_empty() {
+                    if let Err(e) = redis_store.update_bulk(to_update).await {
+                        tracing::warn!("Failed to bulk update records: {}", e);
+                        error_count += update_len;
+                    } else {
+                        updated_count += update_len;
+                    }
+                }
+
+                skipped_count += block_skipped;
+                error_count += block_errors;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to process block {}: {}", block_index + 1, e);
+                error_count += chunk.len();
+            }
+        }
 
         tracing::info!(
             "Completed block {} of {}. Running totals - Created: {}, Updated: {}, Skipped: {}, Errors: {}",
             block_index + 1,
             (attachments.len() + block_size - 1) / block_size,
-            created_count.load(std::sync::atomic::Ordering::Relaxed),
-            updated_count.load(std::sync::atomic::Ordering::Relaxed),
-            skipped_count.load(std::sync::atomic::Ordering::Relaxed),
-            error_count.load(std::sync::atomic::Ordering::Relaxed)
+            created_count,
+            updated_count,
+            skipped_count,
+            error_count
         );
     }
 
     tracing::info!(
         "Migration completed for jurisdiction {}. Created: {}, Updated: {}, Skipped: {}, Errors: {}",
         pg_schema,
-        created_count.load(std::sync::atomic::Ordering::Relaxed),
-        updated_count.load(std::sync::atomic::Ordering::Relaxed),
-        skipped_count.load(std::sync::atomic::Ordering::Relaxed),
-        error_count.load(std::sync::atomic::Ordering::Relaxed)
+        created_count,
+        updated_count,
+        skipped_count,
+        error_count
     );
 
     Ok(())
 }
 
-#[derive(Debug)]
-enum MigrationResult {
-    Created,
-    Updated,
-    Skipped,
+async fn process_bulk_attachments_into_records(
+    redis_store: &RedisAttachmentStore,
+    pg_attachments: &[PgAttachmentFull],
+    fixed_jur: FixedJurisdiction,
+) -> Result<(Vec<AttachmentRecord>, Vec<AttachmentRecord>, usize, usize)> {
+    let mut to_create = Vec::new();
+    let mut to_update = Vec::new();
+    let mut skipped = 0;
+    let mut errors = 0;
+
+    for pg_attachment in pg_attachments {
+        if pg_attachment.attachment_url.trim().is_empty() {
+            tracing::debug!("Skipping attachment {} with empty URL", pg_attachment.uuid);
+            skipped += 1;
+            continue;
+        }
+
+        let locator = AttachmentLocator::Url(pg_attachment.attachment_url.clone());
+
+        match process_single_attachment_to_record(redis_store, pg_attachment, &locator, fixed_jur)
+            .await
+        {
+            Ok(Some(ProcessedRecord::Create(record))) => {
+                to_create.push(record);
+            }
+            Ok(Some(ProcessedRecord::Update(record))) => {
+                to_update.push(record);
+            }
+            Ok(None) => {
+                skipped += 1;
+            }
+            Err(e) => {
+                tracing::warn!("Failed to process attachment {}: {}", pg_attachment.uuid, e);
+                errors += 1;
+            }
+        }
+    }
+
+    Ok((to_create, to_update, skipped, errors))
 }
 
-async fn process_single_attachment(
+#[derive(Debug)]
+enum ProcessedRecord {
+    Create(AttachmentRecord),
+    Update(AttachmentRecord),
+}
+
+async fn process_single_attachment_to_record(
     redis_store: &RedisAttachmentStore,
     pg_attachment: &PgAttachmentFull,
     locator: &AttachmentLocator,
     fixed_jur: FixedJurisdiction,
-) -> Result<MigrationResult> {
+) -> Result<Option<ProcessedRecord>> {
     let existing_record = redis_store.get(locator).await?;
 
     match existing_record {
@@ -243,7 +297,7 @@ async fn process_single_attachment(
                     "Attachment {} already exists with history, skipping",
                     pg_attachment.uuid
                 );
-                return Ok(MigrationResult::Skipped);
+                return Ok(None);
             } else if !pg_attachment.file_hash_if_downloaded.trim().is_empty() {
                 let hash = pg_attachment
                     .file_hash_if_downloaded
@@ -253,18 +307,17 @@ async fn process_single_attachment(
                 let version = create_attachment_version_from_pg(pg_attachment, hash)?;
                 record.add_version(version);
 
-                redis_store.update(&record).await?;
                 tracing::debug!(
                     "Added version to existing attachment {}",
                     pg_attachment.uuid
                 );
-                return Ok(MigrationResult::Updated);
+                return Ok(Some(ProcessedRecord::Update(record)));
             } else {
                 tracing::debug!(
                     "Attachment {} exists in Redis but no hash in PG",
                     pg_attachment.uuid
                 );
-                return Ok(MigrationResult::Skipped);
+                return Ok(None);
             }
         }
         None => {
@@ -282,13 +335,8 @@ async fn process_single_attachment(
                 new_record.add_version(version);
             }
 
-            let tag = AttachmentTag::new(
-                fixed_jur,
-                !pg_attachment.file_hash_if_downloaded.trim().is_empty(),
-            );
-            redis_store.store(&new_record, tag).await?;
             tracing::debug!("Created new attachment record for {}", pg_attachment.uuid);
-            return Ok(MigrationResult::Created);
+            return Ok(Some(ProcessedRecord::Create(new_record)));
         }
     }
 }
