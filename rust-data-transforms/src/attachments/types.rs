@@ -30,6 +30,13 @@ impl AttachmentLocator {
         }
     }
 
+    pub fn parse_from_cache_key(key: &str) -> Option<Self> {
+        match key {
+            _ if key.starts_with("url:") => Some(AttachmentLocator::Url(key[4..].to_string())),
+            _ => None,
+        }
+    }
+
     /// Get the raw URL string if this is a URL locator
     pub fn as_url(&self) -> Option<&str> {
         match self {
