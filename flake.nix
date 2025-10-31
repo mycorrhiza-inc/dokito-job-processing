@@ -88,8 +88,8 @@
 
             # Set up Redis configuration for author caching
             export REDIS_DATA_DIR="$BINARY_EXECUTION_PATH/redis_data"
-            if [ -z "''${REDIS_URL:-}" ]; then
-              export REDIS_URL="redis://127.0.0.1:6379"
+            if [ -z "''${DOKITO_INGEST_REDIS:-}" ]; then
+              export DOKITO_INGEST_REDIS="redis://127.0.0.1:6379"
             fi
           '';
 
@@ -105,19 +105,18 @@
             echo "  Download: $DOKITO_DOWNLOAD_ATTACHMENTS_BINARY_PATH"
             echo "  Database: $DOKITO_DATABASE_UTILS_BINARY_PATH"
             echo "  Current Directory: $BINARY_EXECUTION_PATH"
-            echo "  Redis URL: $REDIS_URL"
+            echo "  Redis URL: $DOKITO_INGEST_REDIS"
             echo "  Redis Data: $REDIS_DATA_DIR"
             echo ""
 
             # Check Redis connectivity
             echo "🔍 Checking Redis connectivity..."
-            if ${pkgs.redis}/bin/redis-cli -u "''${REDIS_URL}" --tls ping >/dev/null 2>&1; then
+            if ${pkgs.redis}/bin/redis-cli -u "''${DOKITO_INGEST_REDIS}" --tls ping >/dev/null 2>&1; then
               echo "✅ Redis server responsive"
-              echo "   Cache keys: $(${pkgs.redis}/bin/redis-cli -u "''${REDIS_URL}" --tls dbsize 2>/dev/null || echo 'unknown')"
             else
               echo "❌ Redis server not responding"
               echo "   Author caching will be disabled"
-              echo "   Check your REDIS_URL setting: $REDIS_URL"
+              echo "   Check your DOKITO_INGEST_REDIS setting: $DOKITO_INGEST_REDIS"
             fi
             echo ""
 

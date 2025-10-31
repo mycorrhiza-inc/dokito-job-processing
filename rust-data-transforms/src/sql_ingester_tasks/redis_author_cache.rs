@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::attachments::redis_store::REDIS_URL;
+use crate::attachments::redis_store::DOKITO_INGEST_REDIS;
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 
 static REDIS_CLIENT: OnceLock<Mutex<Option<Client>>> = OnceLock::new();
@@ -36,7 +36,7 @@ pub struct DuplicateTracker {
 /// Initialize Redis connection from environment variables
 /// Falls back gracefully if Redis is unavailable
 pub async fn init_redis_client() -> Result<()> {
-    let redis_url = &**REDIS_URL;
+    let redis_url = &**DOKITO_INGEST_REDIS;
 
     match Client::open(redis_url) {
         Ok(client) => {

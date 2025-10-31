@@ -18,8 +18,8 @@ pub struct RedisAttachmentStore {
     client: Client,
 }
 
-pub static REDIS_URL: LazyLock<String> = LazyLock::new(|| {
-    env::var("REDIS_URL")
+pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
+    env::var("DOKITO_INGEST_REDIS")
         .ok()
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "redis://127.0.0.1:6379".to_string())
@@ -28,7 +28,7 @@ pub static REDIS_URL: LazyLock<String> = LazyLock::new(|| {
 impl RedisAttachmentStore {
     /// Create a new Redis attachment store
     pub fn new() -> Result<Self> {
-        let redis_url = &**REDIS_URL;
+        let redis_url = &**DOKITO_INGEST_REDIS;
         let client = Client::open(redis_url).context("Failed to create Redis client")?;
 
         Ok(Self { client })
