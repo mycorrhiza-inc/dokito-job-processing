@@ -34,13 +34,12 @@ struct Cli {
 #[derive(sqlx::FromRow)]
 struct MissingAttachmentRecord {
     uuid: Uuid,
-    name: String,
-    url: String,
+    attachment_file_name: String,
+    attachment_url: String,
     attachment_type: String,
     attachment_subtype: String,
-    document_extension: String,
-    index_in_filing: i64,
-    attachment_govid: String,
+    attachment_file_extension: String,
+    openscrapers_id: String,
 }
 
 async fn fetch_missing_attachments_from_postgres(
@@ -50,8 +49,8 @@ async fn fetch_missing_attachments_from_postgres(
     let pg_schema = fixed_jur.get_postgres_schema_name();
 
     let query = format!(
-        "SELECT uuid, name, url, attachment_type, attachment_subtype, document_extension,
-                index_in_filing, attachment_govid
+        "SELECT uuid, attachment_file_name, attachment_url, attachment_type, attachment_subtype,
+                attachment_file_extension, openscrapers_id
          FROM {pg_schema}.attachments
          WHERE file_hash_if_downloaded IS NULL OR file_hash_if_downloaded = ''"
     );
@@ -62,16 +61,16 @@ async fn fetch_missing_attachments_from_postgres(
 
     let mut attachments = Vec::new();
     for record in records {
-        let document_extension = FileExtension::from_str(&record.document_extension)
-            .unwrap_or_else(|_| FileExtension::Unknown(record.document_extension.clone()));
+        let document_extension = FileExtension::from_str(&record.attachment_file_extension)
+            .unwrap_or_else(|_| FileExtension::Unknown(record.attachment_file_extension.clone()));
 
         let attachment = ProcessedGenericAttachment {
-            name: record.name,
-            index_in_filing: record.index_in_filing as u64,
+            name: record.attachment_file_name,
+            index_in_filing: 0, // Not available in PostgreSQL schema, defaulting to 0
             document_extension,
             object_uuid: record.uuid,
-            attachment_govid: record.attachment_govid,
-            url: record.url,
+            attachment_govid: record.openscrapers_id,
+            url: record.attachment_url,
             attachment_type: record.attachment_type,
             attachment_subtype: record.attachment_subtype,
             extra_metadata: Default::default(),
