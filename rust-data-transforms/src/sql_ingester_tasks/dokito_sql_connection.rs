@@ -52,7 +52,7 @@ pub async fn get_dokito_pool() -> Result<&'static PgPool, InitializePostgresErro
                 }
             );
             eprintln!("Expected environment variables: POSTGRES_CONNECTION or DATABASE_URL");
-            eprintln!("");
+            eprintln!();
             eprintln!("IMPORTANT: If you see 'MAC tag mismatch' error above, this is misleading!");
             eprintln!("This version of sqlx reports 'MAC tag mismatch' when the actual issue");
             eprintln!("is typically an incorrect password or authentication failure.");

@@ -1,33 +1,15 @@
-use std::{
-    collections::HashSet,
-    hash::{DefaultHasher, Hash, Hasher},
-    mem::take,
-};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::types::{
-    env_vars::DIGITALOCEAN_S3,
-    processed::{ProcessedGenericDocket, ProcessedGenericFiling, ProcessedGenericOrganization},
-    raw::JurisdictionInfo,
-    s3_stuff::{DocketAddress, list_raw_cases_for_jurisdiction},
-};
-use async_trait::async_trait;
+use crate::types::processed::{ProcessedGenericDocket, ProcessedGenericFiling, ProcessedGenericOrganization};
 use futures::future::join_all;
-use rand::{SeedableRng, rngs::SmallRng, seq::SliceRandom};
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde_json::Value;
-use sqlx::{PgPool, Pool, Postgres, query_scalar, types::Uuid};
+use sqlx::{Pool, Postgres, query_scalar, types::Uuid};
 
-use mycorrhiza_common::tasks::ExecuteUserTask;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
 use crate::{
     jurisdiction_schema_mapping::FixedJurisdiction,
-    sql_ingester_tasks::{
-        database_author_association::*, dokito_sql_connection::get_dokito_pool,
-        recreate_dokito_table_schema::delete_all_data,
-    },
+    sql_ingester_tasks::database_author_association::*,
 };
 
 fn generate_hash(x: &impl Hash) -> u64 {

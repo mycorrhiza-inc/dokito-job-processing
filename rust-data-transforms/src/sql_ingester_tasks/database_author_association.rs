@@ -96,7 +96,7 @@ async fn associate_individual_author_with_name_db_only(
     }
 
     // Step 2: Match (and possibly deduplicate) by full name
-    if let Some(found_uuid) = find_and_merge_humans_by_name(individual, &pg_schema, pool).await? {
+    if let Some(found_uuid) = find_and_merge_humans_by_name(individual, pg_schema, pool).await? {
         individual.object_uuid = found_uuid;
         return Ok(found_uuid);
     }
@@ -152,7 +152,7 @@ pub async fn associate_individual_author_with_name(
     }
 
     // Step 2: Match (and possibly deduplicate) by full name
-    if let Some(found_uuid) = find_and_merge_humans_by_name(individual, &pg_schema, pool).await? {
+    if let Some(found_uuid) = find_and_merge_humans_by_name(individual, pg_schema, pool).await? {
         individual.object_uuid = found_uuid;
         return Ok(());
     }
@@ -308,7 +308,7 @@ async fn associate_organization_with_name_db_only(
     }
 
     // Step 2: Match (and deduplicate) by org name
-    if let Some(found_uuid) = find_and_merge_orgs_by_name(org, &pg_schema, pool).await? {
+    if let Some(found_uuid) = find_and_merge_orgs_by_name(org, pg_schema, pool).await? {
         org.object_uuid = found_uuid;
         return Ok(found_uuid);
     }
@@ -363,7 +363,7 @@ pub async fn associate_organization_with_name(
     }
 
     // Step 2: Match (and deduplicate) by org name
-    if let Some(found_uuid) = find_and_merge_orgs_by_name(org, &pg_schema, pool).await? {
+    if let Some(found_uuid) = find_and_merge_orgs_by_name(org, pg_schema, pool).await? {
         org.object_uuid = found_uuid;
         return Ok(());
     }

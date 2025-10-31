@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use redis::{AsyncCommands, Client};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::env;
 use std::sync::OnceLock;
 use tokio::sync::Mutex;
 use uuid::Uuid;

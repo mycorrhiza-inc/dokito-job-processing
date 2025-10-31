@@ -11,7 +11,6 @@ use std::sync::{LazyLock, OnceLock};
 use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, warn};
 
-use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 
 /// Redis store for AttachmentRecord data with tag-based organization
 #[derive(Clone, Copy)]
@@ -32,14 +31,14 @@ pub async fn get_universal_multiplexed_redis_connection()
     async fn create_multiplexed_redis_connection() -> Result<redis::aio::MultiplexedConnection> {
         let redis_url = &**DOKITO_INGEST_REDIS;
         let client = Client::open(redis_url).context("Failed to create Redis client")?;
-        let connection = client
+        
+        client
             .get_multiplexed_async_connection()
             .await
             .map_err(|e| {
                 tracing::error!("Redis connection error details: {}", e);
                 anyhow::anyhow!("Failed to get Redis connection: {}", e)
-            });
-        connection
+            })
     }
     let conn = MULTIPLEXED_REDIS_CONNECTION
         .get_or_try_init(create_multiplexed_redis_connection)
@@ -56,8 +55,7 @@ impl RedisAttachmentStore {
     /// Get a Redis connection
     async fn get_connection() -> Result<redis::aio::MultiplexedConnection> {
         get_universal_multiplexed_redis_connection()
-            .await
-            .map(|conn| conn.clone())
+            .await.cloned()
     }
 
     /// Get the Redis key for storing attachment record data
@@ -399,7 +397,7 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
         match RedisAttachmentStore::new() {
             Ok(store) => {
                 // Test the connection
-                match store.get_connection().await {
+                match RedisAttachmentStore::get_connection().await {
                     Ok(mut conn) => match redis::cmd("PING").query_async::<()>(&mut conn).await {
                         Ok(_) => {
                             *store_guard = Some(store);
@@ -422,5 +420,5 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
         }
     }
 
-    store_guard.clone()
+    *store_guard
 }

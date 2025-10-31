@@ -5,8 +5,8 @@ use mycorrhiza_common::{file_extension::FileExtension, hash::Blake2bHash};
 use non_empty_string::NonEmptyString;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fmt::Display};
+use sha2::Digest;
+use std::collections::HashMap;
 
 use crate::jurisdiction_schema_mapping::FixedJurisdiction;
 

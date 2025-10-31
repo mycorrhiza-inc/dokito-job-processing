@@ -1,12 +1,10 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
-use futures::future::join_all;
 use mycorrhiza_common::file_extension::{FileExtension, StaticExtension};
 use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::NonEmptyString;
 use sqlx::FromRow;
-use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::attachments::{
@@ -92,7 +90,7 @@ pub async fn update_attachment_hashes_from_redis(fixed_jur: FixedJurisdiction) -
                             pg_schema
                         ))
                         .bind(&hash_string)
-                        .bind(&attachment.uuid)
+                        .bind(attachment.uuid)
                         .execute(pool_ref)
                         .await
                         {
@@ -214,7 +212,7 @@ pub async fn migrate_attachments_to_redis(fixed_jur: FixedJurisdiction) -> Resul
         tracing::info!(
             "Completed block {} of {}. Running totals - Created: {}, Updated: {}, Skipped: {}, Errors: {}",
             block_index + 1,
-            (attachments.len() + block_size - 1) / block_size,
+            attachments.len().div_ceil(block_size),
             created_count,
             updated_count,
             skipped_count,
@@ -299,13 +297,14 @@ fn process_single_attachment_with_existing(
     fixed_jur: FixedJurisdiction,
 ) -> Result<Option<ProcessedRecord>> {
     match existing_record {
-        Some(mut record) => {
+        Some(record) => {
+            let mut record = record.clone();
             if record.is_downloaded() {
                 tracing::debug!(
                     "Attachment {} already exists with history, skipping",
                     pg_attachment.uuid
                 );
-                return Ok(None);
+                Ok(None)
             } else if !pg_attachment.file_hash_if_downloaded.trim().is_empty() {
                 let hash = pg_attachment
                     .file_hash_if_downloaded
@@ -319,13 +318,13 @@ fn process_single_attachment_with_existing(
                     "Added version to existing attachment {}",
                     pg_attachment.uuid
                 );
-                return Ok(Some(ProcessedRecord::Update(record)));
+                Ok(Some(ProcessedRecord::Update(record)))
             } else {
                 tracing::debug!(
                     "Attachment {} exists in Redis but no hash in PG",
                     pg_attachment.uuid
                 );
-                return Ok(None);
+                Ok(None)
             }
         }
         None => {
@@ -344,7 +343,7 @@ fn process_single_attachment_with_existing(
             }
 
             tracing::debug!("Created new attachment record for {}", pg_attachment.uuid);
-            return Ok(Some(ProcessedRecord::Create(new_record)));
+            Ok(Some(ProcessedRecord::Create(new_record)))
         }
     }
 }
@@ -365,7 +364,7 @@ fn create_attachment_version_from_pg(
             &pg_attachment.attachment_url
         };
 
-        if let Some(ext) = filename.split('.').last() {
+        if let Some(ext) = filename.split('.').next_back() {
             ext.parse::<FileExtension>()
                 .unwrap_or(FileExtension::Static(StaticExtension::Pdf))
         } else {

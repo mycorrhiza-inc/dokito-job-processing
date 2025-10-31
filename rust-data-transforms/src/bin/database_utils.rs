@@ -6,9 +6,7 @@ use rust_data_transforms::sql_ingester_tasks::recreate_dokito_table_schema::recr
 use rust_data_transforms::attachments::postgres_migration_utils::{
     update_attachment_hashes_from_redis, migrate_attachments_to_redis
 };
-use serde_json;
 use sqlx::{FromRow, query_as};
-use tracing_subscriber;
 
 #[derive(FromRow)]
 struct DocketId {

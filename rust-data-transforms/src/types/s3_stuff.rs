@@ -1,11 +1,4 @@
-use anyhow::anyhow;
-use futures_util::join;
-use mycorrhiza_common::s3_generic::S3Credentials;
-use mycorrhiza_common::s3_generic::cannonical_location::{
-    CannonicalS3ObjectLocation, download_openscrapers_object, get_openscrapers_json_key,
-};
 use mycorrhiza_common::s3_generic::fetchers_and_getters::{S3Addr, S3DirectoryAddr};
-use non_empty_string::non_empty_string;
 use tracing::{debug, info};
 
 // RawAttachment removed - using Redis-based attachment system instead

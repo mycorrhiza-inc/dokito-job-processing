@@ -2,7 +2,7 @@ use std::convert::Infallible;
 
 use crate::types::processed::ProcessedGenericHuman;
 use crate::types::raw::{RawArtificalPersonType, RawGenericParty};
-use chrono::{NaiveDate, Utc};
+use chrono::Utc;
 use futures::future::join_all;
 use futures::join;
 use futures_util::{StreamExt, stream};
@@ -145,7 +145,7 @@ impl ProcessFrom<RawGenericDocket> for ProcessedGenericDocket {
         let mut processed_filings = {
             const BATCH_SIZE: usize = 50;
             if matched_filings.len() > BATCH_SIZE {
-                let total_batches = (matched_filings.len() + BATCH_SIZE - 1) / BATCH_SIZE; // Round up division
+                let total_batches = matched_filings.len().div_ceil(BATCH_SIZE); // Round up division
 
                 tracing::info!(
                     total_batches = total_batches,

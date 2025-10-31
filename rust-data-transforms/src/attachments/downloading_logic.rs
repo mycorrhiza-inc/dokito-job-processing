@@ -11,11 +11,9 @@ use crate::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use crate::types::processed::ProcessedGenericAttachment;
 use crate::types::raw::JurisdictionInfo;
 use aws_sdk_s3::Client as S3Client;
-use chrono::Utc;
 use mycorrhiza_common::file_extension::FileExtension;
 use mycorrhiza_common::hash::Blake2bHash;
 use non_empty_string::{NonEmptyString, non_empty_string};
-use sqlx::prelude::FromRow;
 // SQL functions are imported via the old downloading module
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -57,13 +55,13 @@ impl AttachmentProcessor {
         let locator = AttachmentLocator::Url(attachment.url.clone());
 
         // Check Redis cache first
-        if let Some(cached_record) = lookup_attachment_from_redis(&locator).await {
-            if let Some(current_version) = cached_record.current_version() {
+        if let Some(cached_record) = lookup_attachment_from_redis(&locator).await
+            && let Some(current_version) = cached_record.current_version() {
                 attachment.hash = Some(current_version.content_hash);
                 let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
                     attachment,
                     extra_data.fixed_jurisdiction,
-                    &pool,
+                    pool,
                 )
                 .await?;
 
@@ -74,7 +72,6 @@ impl AttachmentProcessor {
 
                 return Ok(RevalidationOutcome::DidChange);
             }
-        }
 
         debug!(url=%attachment.url, "Downloading attachment file with attachment system");
         let extension = &attachment.document_extension;
@@ -128,7 +125,7 @@ impl AttachmentProcessor {
         let update_pg_result = attempt_to_update_hash_of_postgres_attachment(
             attachment,
             extra_data.fixed_jurisdiction,
-            &pool,
+            pool,
         )
         .await;
         if let Err(err) = update_pg_result {
@@ -176,14 +173,13 @@ async fn store_attachment_in_redis(
     // Check if record already exists
     if let Some(mut existing_record) = store.get(locator).await? {
         // Check if this is a new version or same content
-        if let Some(current_version) = existing_record.current_version() {
-            if current_version.same_content(&version) {
+        if let Some(current_version) = existing_record.current_version()
+            && current_version.same_content(&version) {
                 // Same content, just mark as checked
                 existing_record.mark_checked();
                 store.update(&existing_record).await?;
                 return Ok(());
             }
-        }
 
         // New version, add it to history
         existing_record.add_version(version);

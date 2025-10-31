@@ -5,9 +5,7 @@ use rust_data_transforms::data_processing_traits::ProcessFrom;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::redis_author_cache::init_redis_client;
 use rust_data_transforms::types::processed::ProcessedGenericDocket;
-use serde_json;
 use std::io::{self, BufWriter, Read, Write};
-use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "process-dockets")]

@@ -5,9 +5,7 @@ use rust_data_transforms::data_processing_traits::DownloadIncomplete;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::attachments::OpenscrapersExtraData;
 use rust_data_transforms::types::env_vars::DIGITALOCEAN_S3;
-use serde_json;
 use std::io::{self, Read, Write};
-use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "download-attachments")]

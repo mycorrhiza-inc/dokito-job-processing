@@ -4,10 +4,8 @@ use rust_data_transforms::cli_input_types::CliProcessedDockets;
 use rust_data_transforms::jurisdiction_schema_mapping::FixedJurisdiction;
 use rust_data_transforms::sql_ingester_tasks::dokito_sql_connection::get_dokito_pool;
 use rust_data_transforms::sql_ingester_tasks::nypuc_ingest::ingest_sql_fixed_jurisdiction_case;
-use serde_json;
 use sqlx::{query, PgPool};
 use std::io::{self, Read, Write};
-use tracing_subscriber;
 use tracing::info;
 
 #[derive(Parser)]
@@ -78,10 +76,10 @@ async fn main() -> Result<()> {
     for processed_docket in processed_dockets.iter_mut() {
         // Delete existing docket if preserve_existing is false (default behavior)
         if !cli.preserve_existing {
-            delete_existing_docket_cascade(&pool, processed_docket.case_govid.as_str(), cli.fixed_jur).await?;
+            delete_existing_docket_cascade(pool, processed_docket.case_govid.as_str(), cli.fixed_jur).await?;
         }
 
-        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, &pool, false).await?;
+        ingest_sql_fixed_jurisdiction_case(processed_docket, cli.fixed_jur, pool, false).await?;
     }
 
     // This returns a list even if only one was imported just to make the output json schema
