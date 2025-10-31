@@ -11,7 +11,6 @@ use std::sync::{LazyLock, OnceLock};
 use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, warn};
 
-
 pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
     env::var("DOKITO_INGEST_REDIS")
         .ok()
@@ -19,13 +18,14 @@ pub static DOKITO_INGEST_REDIS: LazyLock<String> = LazyLock::new(|| {
         .unwrap_or_else(|| "redis://127.0.0.1:6379".to_string())
 });
 
-static GLOBAL_REDIS_CLIENT: LazyLock<Result<Client, anyhow::Error>> = LazyLock::new(|| {
-    let redis_url = &**DOKITO_INGEST_REDIS;
-    Client::open(redis_url).context("Failed to create Redis client")
-});
-
+static GLOBAL_REDIS_CLIENT: OnceLock<Client> = OnceLock::new();
 fn get_global_redis_client() -> Result<&'static Client> {
-    GLOBAL_REDIS_CLIENT.as_ref().map_err(|e| anyhow::anyhow!("{}", e))
+    if let Some(client) = GLOBAL_REDIS_CLIENT.get() {
+        return Ok(client);
+    };
+    let redis_url = &**DOKITO_INGEST_REDIS;
+    let client = Client::open(redis_url).context("Failed to create Redis client")?;
+    Ok(GLOBAL_REDIS_CLIENT.get_or_init(|| client))
 }
 
 /// Redis store for AttachmentRecord data with tag-based organization
@@ -158,21 +158,19 @@ impl RedisAttachmentStore {
         // Convert cache keys to locators
         let locators: Vec<AttachmentLocator> = cache_keys
             .iter()
-            .filter_map(|key| {
-                if let Some(url) = key.strip_prefix("url:") {
-                    Some(AttachmentLocator::Url(url.to_string()))
-                } else {
-                    tracing::warn!("Unrecognized cache key format: {}", key);
-                    None
-                }
-            })
+            .filter_map(|key| AttachmentLocator::parse_from_cache_key(key))
             .collect();
 
         tracing::debug!("Converted {} cache keys to locators", locators.len());
 
         // Use bulk get to fetch all records
-        let records_map = self.get_bulk(&locators).await
-            .with_context(|| format!("Failed to bulk fetch {} records for tag: {}", locators.len(), tag))?;
+        let records_map = self.get_bulk(&locators).await.with_context(|| {
+            format!(
+                "Failed to bulk fetch {} records for tag: {}",
+                locators.len(),
+                tag
+            )
+        })?;
 
         let records: Vec<AttachmentRecord> = records_map.into_values().collect();
 
@@ -264,7 +262,6 @@ impl RedisAttachmentStore {
                 ));
             }
         };
-
         // Add the new version
         record.add_version(version);
 
@@ -415,6 +412,5 @@ pub async fn get_redis_store() -> Option<RedisAttachmentStore> {
             }
         }
     }
-
     store_guard.clone()
 }
