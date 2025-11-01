@@ -64,7 +64,7 @@ impl RedisAttachmentStore {
     }
 
     /// Store an AttachmentRecord with the given tag
-    pub async fn store(&self, record: &AttachmentRecord, tag: AttachmentTag) -> Result<()> {
+    pub async fn store(&self, record: &AttachmentRecord) -> Result<()> {
         self.store_bulk(std::slice::from_ref(record).to_vec()).await
     }
 
@@ -239,7 +239,8 @@ impl RedisAttachmentStore {
                 .context("Failed to serialize attachment record")?;
             let key = Self::record_key(&update.record.locator);
             let cache_key = update.record.locator.cache_key();
-            let new_tag = AttachmentTag::new(update.record.jurisdiction, update.record.is_downloaded());
+            let new_tag =
+                AttachmentTag::new(update.record.jurisdiction, update.record.is_downloaded());
 
             // Update the record data
             pipe.hset(&key, "data", &data);
@@ -258,7 +259,10 @@ impl RedisAttachmentStore {
             .await
             .context("Failed to bulk update attachment records")?;
 
-        debug!("Bulk updated {} attachment records with tag management", updates.len());
+        debug!(
+            "Bulk updated {} attachment records with tag management",
+            updates.len()
+        );
         Ok(())
     }
 

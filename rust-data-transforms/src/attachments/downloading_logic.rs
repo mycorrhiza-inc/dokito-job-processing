@@ -56,22 +56,23 @@ impl AttachmentProcessor {
 
         // Check Redis cache first
         if let Some(cached_record) = lookup_attachment_from_redis(&locator).await
-            && let Some(current_version) = cached_record.current_version() {
-                attachment.hash = Some(current_version.content_hash);
-                let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
-                    attachment,
-                    extra_data.fixed_jurisdiction,
-                    pool,
-                )
-                .await?;
+            && let Some(current_version) = cached_record.current_version()
+        {
+            attachment.hash = Some(current_version.content_hash);
+            let _update_pg_result = attempt_to_update_hash_of_postgres_attachment(
+                attachment,
+                extra_data.fixed_jurisdiction,
+                pool,
+            )
+            .await?;
 
-                // Mark as checked in system
-                if let Err(e) = mark_attachment_checked(&locator).await {
-                    warn!("Failed to mark attachment as checked: {}", e);
-                }
-
-                return Ok(RevalidationOutcome::DidChange);
+            // Mark as checked in system
+            if let Err(e) = mark_attachment_checked(&locator).await {
+                warn!("Failed to mark attachment as checked: {}", e);
             }
+
+            return Ok(RevalidationOutcome::DidChange);
+        }
 
         debug!(url=%attachment.url, "Downloading attachment file with attachment system");
         let extension = &attachment.document_extension;
@@ -112,12 +113,16 @@ impl AttachmentProcessor {
 
         // Upload file content to S3 (metadata is now stored in Redis)
         let file_key = format!("raw/file/{hash}");
-        use mycorrhiza_common::s3_generic::fetchers_and_getters::S3Addr;
         use crate::types::env_vars::OPENSCRAPERS_S3_OBJECT_BUCKET;
+        use mycorrhiza_common::s3_generic::fetchers_and_getters::S3Addr;
 
-        S3Addr::new(&extra_data.s3_client, &OPENSCRAPERS_S3_OBJECT_BUCKET, &file_key)
-            .upload_bytes(file_contents)
-            .await?;
+        S3Addr::new(
+            &extra_data.s3_client,
+            &OPENSCRAPERS_S3_OBJECT_BUCKET,
+            &file_key,
+        )
+        .upload_bytes(file_contents)
+        .await?;
 
         attachment.hash = Some(hash);
 
@@ -173,20 +178,24 @@ async fn store_attachment_in_redis(
     // Check if record already exists
     if let Some(mut existing_record) = store.get(locator).await? {
         // Track the previous tag before any modifications
-        let previous_tag = AttachmentTag::new(existing_record.jurisdiction, existing_record.is_downloaded());
+        let previous_tag = AttachmentTag::new(
+            existing_record.jurisdiction,
+            existing_record.is_downloaded(),
+        );
 
         // Check if this is a new version or same content
         if let Some(current_version) = existing_record.current_version()
-            && current_version.same_content(&version) {
-                // Same content, just mark as checked
-                existing_record.mark_checked();
-                let update = UpdateRedisAttachment {
-                    record: existing_record,
-                    previous_tag,
-                };
-                store.update(update).await?;
-                return Ok(());
-            }
+            && current_version.same_content(&version)
+        {
+            // Same content, just mark as checked
+            existing_record.mark_checked();
+            let update = UpdateRedisAttachment {
+                record: existing_record,
+                previous_tag,
+            };
+            store.update(update).await?;
+            return Ok(());
+        }
 
         // New version, add it to history
         existing_record.add_version(version);
@@ -200,9 +209,7 @@ async fn store_attachment_in_redis(
         let mut record = AttachmentRecord::new(locator.clone(), jurisdiction);
         record.add_version(version);
 
-        // Store as downloaded since we just downloaded it
-        let tag = AttachmentTag::new(jurisdiction, true);
-        store.store(&record, tag).await?;
+        store.store(&record).await?;
     }
 
     Ok(())
@@ -213,7 +220,6 @@ async fn mark_attachment_checked(locator: &AttachmentLocator) -> Result<()> {
     let store = RedisAttachmentStore::new()?;
     store.mark_checked(locator).await
 }
-
 
 // Supporting types and functions
 pub enum PGUpdateOutcome {
@@ -264,7 +270,6 @@ pub async fn attempt_to_update_hash_of_postgres_attachment(
     }
 }
 
-
 static MAXIMUM_EXTERNAL_FILE_DOWNLOADS: Semaphore = Semaphore::const_new(10);
 
 async fn download_file_content_validated_with_retries<T: InternetFileFetch + ?Sized>(
@@ -302,4 +307,3 @@ async fn download_file_content_validated_with_retries<T: InternetFileFetch + ?Si
 
     Err(last_error.unwrap())
 }
-
